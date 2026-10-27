@@ -1,0 +1,223 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 1. MULTI-TENANCY & CONFIGURAÇÃO DA CLÍNICA
+// ==========================================
+
+model Clinic {
+  id                  String   @id @default(uuid())
+  name                String   // Ex: "Clínica Sorriso Perfeito"
+  slug                String   @unique
+  phone               String   // WhatsApp conectado
+  address             String?
+  logoUrl             String?  @db.Text // Logo White-Label da clínica (URL ou Base64)
+  brandColor          String   @default("#0284c7") // Cor principal do tema da clínica
+  acceptedInsurances  String[] // Ex: ["Particular", "Amil Dental", "Bradesco"]
+  
+  // Configurações do Agente de IA
+  aiAssistantName     String   @default("Sofia")
+  aiCustomRules       String?  @db.Text // Regras específicas da clínica
+  whatsappInstanceId  String?  @unique  // ID da instância na Evolution API / Z-API
+  isBotActive         Boolean  @default(true) // Chave geral (Master Switch) da clínica
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  users               User[]
+  dentists            Dentist[]
+  procedures          Procedure[]
+  patients            Patient[]
+  appointments        Appointment[]
+  conversations       Conversation[]
+}
+
+model User {
+  id           String     @id @default(uuid())
+  clinicId     String
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         UserRole   @default(RECEPTIONIST)
+  createdAt    DateTime   @default(now())
+
+  clinic       Clinic     @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId])
+}
+
+enum UserRole {
+  ADMIN
+  DENTIST
+  RECEPTIONIST
+}
+
+// ==========================================
+// 2. CORPO CLÍNICO, HORÁRIOS E PROCEDIMENTOS
+// ==========================================
+
+model Dentist {
+  id           String         @id @default(uuid())
+  clinicId     String
+  name         String         // Ex: "Dr. Carlos Eduardo"
+  cro          String?        // Registro no conselho
+  specialty    String         // Ex: "Implantodontia e Clínica Geral"
+  color        String         @default("#0ea5e9") // Cor na agenda visual do Front-end
+  isActive     Boolean        @default(true)
+
+  clinic       Clinic         @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  workingHours WorkingHours[]
+  appointments Appointment[]
+
+  @@index([clinicId])
+}
+
+// Define os dias e horários que cada dentista atende
+model WorkingHours {
+  id          String  @id @default(uuid())
+  dentistId   String
+  dayOfWeek   Int     // 0 = Domingo, 1 = Segunda ... 6 = Sábado
+  startTime   String  // Formato "HH:mm" (ex: "08:00")
+  endTime     String  // Formato "HH:mm" (ex: "18:00")
+  breakStart  String? // Horário de almoço início (ex: "12:00")
+  breakEnd    String? // Horário de almoço fim (ex: "13:30")
+
+  dentist     Dentist @relation(fields: [dentistId], references: [id], onDelete: Cascade)
+
+  @@unique([dentistId, dayOfWeek])
+}
+
+// Catálogo de procedimentos para a IA saber tempo de duração e valores base
+model Procedure {
+  id              String        @id @default(uuid())
+  clinicId        String
+  name            String        // Ex: "Avaliação Inicial", "Limpeza (Profilaxia)", "Urgência / Dor"
+  durationMinutes Int           @default(30) // Crucial para calcular encaixes na agenda
+  price           Decimal?      @db.Decimal(10, 2) // NULL se a clínica não quiser divulgar preço no WhatsApp
+  allowAiBooking  Boolean       @default(true)
+
+  clinic          Clinic        @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  appointments    Appointment[]
+
+  @@index([clinicId])
+}
+
+// ==========================================
+// 3. PACIENTES E AGENDA (CORE)
+// ==========================================
+
+model Patient {
+  id            String         @id @default(uuid())
+  clinicId      String
+  name          String
+  phone         String         // Formato E.164: "5511999999999"
+  cpf           String?
+  birthDate     DateTime?
+  insuranceName String?        // Convênio do paciente
+  notes         String?        @db.Text
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  clinic        Clinic         @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  appointments  Appointment[]
+  conversations Conversation[]
+
+  @@unique([clinicId, phone])
+  @@index([clinicId, phone])
+}
+
+model Appointment {
+  id            String            @id @default(uuid())
+  clinicId      String
+  patientId     String
+  dentistId     String
+  procedureId   String
+  
+  startTime     DateTime          // Data/hora exata de início (UTC)
+  endTime       DateTime          // Calculado: startTime + procedure.durationMinutes
+  status        AppointmentStatus @default(SCHEDULED)
+  
+  bookedByAi    Boolean           @default(true) // Métrica de ROI no Dashboard da clínica
+  reminderSent  Boolean           @default(false) // Controle do disparo de confirmação 24h antes
+  notes         String?           @db.Text
+  
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  clinic        Clinic            @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patient       Patient           @relation(fields: [patientId], references: [id])
+  dentist       Dentist           @relation(fields: [dentistId], references: [id])
+  procedure     Procedure         @relation(fields: [procedureId], references: [id])
+
+  @@index([clinicId, startTime, endTime])
+  @@index([dentistId, startTime])
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+// ==========================================
+// 4. WHATSAPP, MEMÓRIA DA IA E HANDOFF HUMANO
+// ==========================================
+
+model Conversation {
+  id                String             @id @default(uuid())
+  clinicId          String
+  patientId         String
+  status            ConversationStatus @default(AI_HANDLING)
+  
+  handoffReason     String?
+  urgency           UrgencyLevel       @default(NORMAL)
+  botPausedUntil    DateTime?
+  lastMessageAt     DateTime           @default(now())
+
+  clinic            Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patient           Patient            @relation(fields: [patientId], references: [id])
+  messages          Message[]
+
+  @@unique([clinicId, patientId])
+  @@index([clinicId, status, lastMessageAt])
+}
+
+enum ConversationStatus {
+  AI_HANDLING
+  WAITING_HUMAN
+  HUMAN_HANDLING
+  RESOLVED
+}
+
+enum UrgencyLevel {
+  LOW
+  NORMAL
+  HIGH
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  sender         SenderType
+  content        String       @db.Text
+  mediaType      String       @default("text")
+  createdAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+enum SenderType {
+  PATIENT
+  AI
+  HUMAN_STAFF
+}

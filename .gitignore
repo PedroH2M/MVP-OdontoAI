@@ -1,0 +1,29 @@
+# Dependências
+node_modules/
+.pnp
+.pnp.js
+
+# Build e Cache Next.js / TypeScript
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Variáveis de Ambiente e Segredos (NUNCA subir chaves de API para o GitHub!)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Sessões de WhatsApp locais
+.wwebjs_auth/
+baileys_auth_info/
+
+# Logs e Sistema
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
