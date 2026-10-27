@@ -120,7 +120,13 @@ class BaileysSessionService {
     qrCodeDataUrl: string | null;
     connectedPhone: string | null;
   }> {
-    if (this.status === 'CONNECTED' || this.isInitializing) {
+    if (
+      this.status === 'CONNECTED' ||
+      this.status === 'CONNECTING' ||
+      this.status === 'QRCODE' ||
+      this.isInitializing ||
+      this.sock
+    ) {
       return {
         status: this.status,
         qrCodeDataUrl: this.qrCodeDataUrl,
@@ -149,9 +155,10 @@ class BaileysSessionService {
       sock.ev.on('creds.update', saveCreds);
 
       sock.ev.on('connection.update', async (update) => {
+        if (this.sock && this.sock !== sock) return;
         const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
+        if (qr && this.status !== 'CONNECTED') {
           this.status = 'QRCODE';
           this.qrCodeDataUrl = await QRCode.toDataURL(qr, {
             width: 280,
@@ -160,6 +167,7 @@ class BaileysSessionService {
         }
 
         if (connection === 'open') {
+          this.sock = sock;
           this.status = 'CONNECTED';
           this.qrCodeDataUrl = null;
           this.connectedPhone = sock.user?.id?.split(':')[0] || 'Conectado';
@@ -168,6 +176,7 @@ class BaileysSessionService {
 
         if (connection === 'close') {
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+          const wasAuthenticated = Boolean(this.connectedPhone);
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
           this.status = 'DISCONNECTED';
@@ -176,7 +185,8 @@ class BaileysSessionService {
 
           if (shouldReconnect) {
             setTimeout(() => this.startSession(), 3000);
-          } else {
+          } else if (wasAuthenticated) {
+            this.connectedPhone = null;
             const authPath = path.resolve(process.cwd(), 'baileys_auth_info');
             if (fs.existsSync(authPath)) {
               fs.rmSync(authPath, { recursive: true, force: true });
@@ -270,32 +280,14 @@ class BaileysSessionService {
           if (!text.trim()) continue;
 
           const lower = text.toLowerCase();
-          const hasExplicitTrigger =
-            this.activeTestJids.has(remoteJid) ||
-            mediaType === 'audio' ||
-            lower.includes('sofia') ||
-            lower.includes('ajuda') ||
-            lower.includes('consulta') ||
-            lower.includes('dentista') ||
-            lower.includes('limpeza') ||
-            lower.includes('horário') ||
-            lower.includes('horario') ||
-            lower.includes('agendar') ||
-            lower.includes('marcar') ||
-            lower.includes('cancelar') ||
-            lower.includes('dente') ||
-            lower.includes('dor') ||
-            lower.includes('clínica') ||
-            lower.includes('clinica') ||
-            lower.includes('avaliação') ||
-            lower.includes('avaliacao') ||
-            lower.includes('convênio') ||
-            lower.includes('convenio');
+          const hasExplicitTrigger = lower.includes('sofia');
 
           console.log(
             `📩 [WhatsApp Real] De: ${remoteJid} | fromMe: ${msg.key.fromMe} | Tipo: ${mediaType} | Texto: "${text}"`
           );
 
+          // Se a mensagem foi enviada pelo próprio dono do aparelho (fromMe: true) para outra pessoa,
+          // ignora (a menos que seja o chat consigo mesmo "Você mesmo" ou contenha a palavra "sofia")
           if (msg.key.fromMe && !isSelfChat && !hasExplicitTrigger) {
             continue;
           }
@@ -304,6 +296,7 @@ class BaileysSessionService {
 
           const patientName = msg.pushName || `Cliente (${cleanPhone.slice(-4)})`;
           await this.handleRealIncomingMessage(
+            sock,
             remoteJid,
             cleanPhone,
             patientName,
@@ -695,6 +688,7 @@ class BaileysSessionService {
   }
 
   private async handleRealIncomingMessage(
+    activeSock: WASocket,
     remoteJid: string,
     phone: string,
     patientName: string,
@@ -741,9 +735,11 @@ class BaileysSessionService {
       return;
     }
 
+    const targetSock = activeSock || this.sock;
+
     try {
-      if (this.sock) {
-        await this.sock.sendPresenceUpdate('composing', remoteJid);
+      if (targetSock) {
+        await targetSock.sendPresenceUpdate('composing', remoteJid);
       }
 
       const { occupiedSlots, patientActiveAppointment } = this.getSchedulingContextForPatient(conv);
@@ -760,8 +756,8 @@ class BaileysSessionService {
       this.applyDeterministicClinicRules(conv, aiResult);
 
       for (const bubble of aiResult.bubbles) {
-        if (this.sock && this.status === 'CONNECTED') {
-          const sent = await this.sock.sendMessage(remoteJid, { text: bubble });
+        if (targetSock) {
+          const sent = await targetSock.sendMessage(remoteJid, { text: bubble });
           if (sent?.key?.id) {
             this.sentMessageIds.add(sent.key.id);
           }
