@@ -57,12 +57,18 @@ export type AiReplyGenerator = (input: {
   patientPhone: string;
   messageHistory: { sender: 'PATIENT' | 'AI' | 'HUMAN_STAFF'; content: string }[];
   newMessage: string;
-  occupiedSlots?: { time: string; dentistName: string; patientName: string }[];
-  patientActiveAppointment?: { time: string; dentistName: string; procedureName: string } | null;
+  occupiedSlots?: { time: string; dentistName: string; patientName: string; dayLabel?: 'hoje' | 'amanhã' }[];
+  patientActiveAppointment?: {
+    time: string;
+    dentistName: string;
+    procedureName: string;
+    dayLabel?: 'hoje' | 'amanhã';
+  } | null;
 }) => Promise<{
   provider?: string;
   reply: string;
   bubbles: string[];
+  updatedContactPhone?: string | null;
   bookedAction: {
     time: string;
     dentistName: string;
@@ -376,8 +382,25 @@ class BaileysSessionService {
     conv: LiveWhatsAppConversation,
     aiResult: Awaited<ReturnType<AiReplyGenerator>>
   ) {
-    const firstName = conv.patient.name.split(' ')[0];
+    const rawFirst = (conv.patient.name || '').trim().split(/\s+/)[0] || '';
+    const isGenericName = /^(cliente|paciente|novo|contato|usu[aá]rio|whatsapp|teste|\d+)$/i.test(
+      rawFirst
+    );
+    const firstName = isGenericName ? '' : rawFirst;
+    const nameSuffix = firstName ? `, ${firstName}` : '';
     const cleanPatientPhone = conv.patient.phone.replace(/\D/g, '');
+
+    if (aiResult.updatedContactPhone) {
+      const newPhone = aiResult.updatedContactPhone;
+      conv.patient.phone = newPhone;
+      this.liveAppointments = this.liveAppointments.map((a) =>
+        a.status !== 'CANCELLED' &&
+        (a.patient.id === conv.patient.id ||
+          a.patient.phone.replace(/\D/g, '') === cleanPatientPhone)
+          ? { ...a, patient: { ...a.patient, phone: newPhone } }
+          : a
+      );
+    }
 
     if (aiResult.handoffAction) {
       conv.status = 'WAITING_HUMAN';
@@ -404,7 +427,7 @@ class BaileysSessionService {
       } else {
         // Paciente não tinha consulta ativa! Evita falso positivo
         aiResult.cancelledAction = null;
-        const msg1 = `Oi, ${firstName}! Procurei aqui pelo seu número (${conv.patient.phone}) na agenda de hoje e não localizei nenhuma consulta ativa marcada.`;
+        const msg1 = `Olha${nameSuffix}, procurei aqui pelo seu número (${conv.patient.phone}) na agenda e não localizei nenhuma consulta ativa marcada.`;
         const msg2 = `Por acaso você agendou usando outro telefone ou em nome de outra pessoa? Me confirma aqui para eu verificar certinho!`;
         aiResult.bubbles = [msg1, msg2];
         aiResult.reply = `${msg1}\n\n${msg2}`;
@@ -434,7 +457,7 @@ class BaileysSessionService {
       // REGRA 1: Fora do horário de funcionamento (08:00 às 18:00)
       if (isNaN(hh) || hh < 8 || hh >= 18) {
         aiResult.bookedAction = null;
-        const msg1 = `Oi, ${firstName}! Nosso horário de atendimento é das 08:00 às 18:00, então às ${rawTime} a clínica está fechada. 😊`;
+        const msg1 = `Olha${nameSuffix}, nosso horário de atendimento é das 08:00 às 18:00, então às ${rawTime} a clínica está fechada. 😊`;
         const msg2 =
           futureSlotsToday.length > 0
             ? `Para hoje ainda temos vaga às ${futureSlotsToday.join(' ou ')}, ou para amanhã às 09:00, 10:30, 14:00 e 16:00. Qual fica melhor para você?`
@@ -448,7 +471,7 @@ class BaileysSessionService {
       if (dayLabel === 'hoje' && requestedTotalMinutes <= nowTotalMinutes) {
         const nowStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         aiResult.bookedAction = null;
-        const msg1 = `Oi, ${firstName}! Como agora já são ${nowStr}, o horário das ${normalizedTime} de hoje já passou. 😅`;
+        const msg1 = `Olha${nameSuffix}, como agora já são ${nowStr}, o horário das ${normalizedTime} de hoje já passou. 😅`;
         const msg2 =
           futureSlotsToday.length > 0
             ? `Para hoje ainda consigo te atender às ${futureSlotsToday.join(' ou ')}, ou se preferir já deixo agendado para amanhã às ${normalizedTime}. Como fica melhor para você?`
@@ -523,7 +546,7 @@ class BaileysSessionService {
 
         const dName = aiResult.bookedAction.dentistName;
         aiResult.bookedAction = null;
-        const msg1 = `Ops, ${firstName}! Acabei de verificar na agenda e o horário das ${normalizedTime} (${dayLabel}) não está disponível pois já está ocupado. 😅`;
+        const msg1 = `Ops${nameSuffix}! Acabei de verificar na agenda e o horário das ${normalizedTime} (${dayLabel}) não está disponível pois já está ocupado. 😅`;
         const msg2 = `Mas ainda tenho horário disponível com ${dName} às ${suggestion}. Algum desses fica bom para você?`;
         aiResult.bubbles = [msg1, msg2];
         aiResult.reply = `${msg1}\n\n${msg2}`;
@@ -568,8 +591,8 @@ class BaileysSessionService {
 
       // Garante confirmação humanizada em 2 balões + validação do número de contato salvo
       const msg1 = previousActiveAppt
-        ? `Prontinho, ${firstName}! Já remarquei sua consulta para ${dayLabel} às ${normalizedTime} com ${aiResult.bookedAction.dentistName}. ✅`
-        : `Prontinho, ${firstName}! Deixei agendada sua consulta (${aiResult.bookedAction.procedureName}) com ${aiResult.bookedAction.dentistName} para ${dayLabel} às ${normalizedTime}. ✅`;
+        ? `Prontinho${nameSuffix}! Já remarquei sua consulta para ${dayLabel} às ${normalizedTime} com ${aiResult.bookedAction.dentistName}. ✅`
+        : `Prontinho${nameSuffix}! Deixei agendada sua consulta (${aiResult.bookedAction.procedureName}) com ${aiResult.bookedAction.dentistName} para ${dayLabel} às ${normalizedTime}. ✅`;
       const msg2 = `Só para eu deixar salvo certinho na ficha da recepção: seu melhor número para contato é este mesmo (${savedPhone})?`;
 
       aiResult.bubbles = [msg1, msg2];
@@ -579,16 +602,24 @@ class BaileysSessionService {
 
   private getSchedulingContextForPatient(conv: LiveWhatsAppConversation) {
     const cleanPhone = conv.patient.phone.replace(/\D/g, '');
+    const todayStr = new Date().toDateString();
+
     const occupiedSlots = this.liveAppointments
       .filter((a) => a.status !== 'CANCELLED')
-      .map((a) => ({
-        time: new Date(a.startTime).toLocaleTimeString('pt-BR', {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        dentistName: a.dentistName,
-        patientName: a.patient.name,
-      }));
+      .map((a) => {
+        const apptDate = new Date(a.startTime);
+        const dayLabel: 'hoje' | 'amanhã' =
+          apptDate.toDateString() === todayStr ? 'hoje' : 'amanhã';
+        return {
+          time: apptDate.toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          dentistName: a.dentistName,
+          patientName: a.patient.name,
+          dayLabel,
+        };
+      });
 
     const existing = this.liveAppointments.find(
       (a) =>
@@ -604,6 +635,9 @@ class BaileysSessionService {
           }),
           dentistName: existing.dentistName,
           procedureName: existing.procedureName,
+          dayLabel: (new Date(existing.startTime).toDateString() === todayStr
+            ? 'hoje'
+            : 'amanhã') as 'hoje' | 'amanhã',
         }
       : null;
 

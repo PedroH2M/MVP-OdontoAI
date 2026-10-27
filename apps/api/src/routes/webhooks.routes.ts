@@ -17,7 +17,11 @@ export async function webhooksRoutes(app: FastifyInstance) {
     acceptedInsurances: ['Particular', 'Amil Dental', 'Bradesco Dental', 'SulAmérica'],
     aiCustomRules:
       'Estacionamento conveniado gratuito no prédio. Avaliações iniciais sem custo para implantes e estética.',
-    dentists: [] as { name: string; specialty: string; cro: string }[],
+    dentists: [
+      { name: 'Dr. Roberto Silva', specialty: 'Implantodontia e Prótese', cro: 'CRO/SP 45.123' },
+      { name: 'Dra. Juliana Mendes', specialty: 'Ortodontia e Estética', cro: 'CRO/SP 52.890' },
+      { name: 'Dr. Lucas Santos', specialty: 'Clínica Geral e Endodontia', cro: 'CRO/SP 61.456' },
+    ] as { name: string; specialty: string; cro: string }[],
   };
 
   /**
@@ -34,8 +38,13 @@ export async function webhooksRoutes(app: FastifyInstance) {
     patientPhone: string;
     messageHistory: { sender: 'PATIENT' | 'AI' | 'HUMAN_STAFF'; content: string }[];
     newMessage: string;
-    occupiedSlots?: { time: string; dentistName: string; patientName: string }[];
-    patientActiveAppointment?: { time: string; dentistName: string; procedureName: string } | null;
+    occupiedSlots?: { time: string; dentistName: string; patientName: string; dayLabel?: 'hoje' | 'amanhã' }[];
+    patientActiveAppointment?: {
+      time: string;
+      dentistName: string;
+      procedureName: string;
+      dayLabel?: 'hoje' | 'amanhã';
+    } | null;
   }) {
     dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
     dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
@@ -87,7 +96,16 @@ export async function webhooksRoutes(app: FastifyInstance) {
       contactPhone: string;
     } | null = null;
     let handoffAction: { reason: string; urgency: 'HIGH' | 'NORMAL' } | null = null;
-    const firstName = data.patientName.split(' ')[0];
+    let updatedContactPhone: string | null = null;
+
+    const rawFirst = (data.patientName || '').trim().split(/\s+/)[0] || '';
+    const isGenericName = /^(cliente|paciente|novo|contato|usu[aá]rio|whatsapp|teste|\d+)$/i.test(
+      rawFirst
+    );
+    const firstName = isGenericName ? '' : rawFirst;
+    const nameSuffix = firstName ? `, ${firstName}` : '';
+    const isFirstTurn = data.messageHistory.length === 0;
+    const greetPrefix = isFirstTurn ? `Oi${nameSuffix}!` : `Perfeito${nameSuffix}!`;
 
     const now = new Date();
     const nowTimeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -111,12 +129,15 @@ export async function webhooksRoutes(app: FastifyInstance) {
 
     const occupiedSummary =
       data.occupiedSlots && data.occupiedSlots.length > 0
-        ? data.occupiedSlots.map((s) => `${s.time} com ${s.dentistName} (OCUPADO)`).join(', ')
-        : 'Nenhum horário ocupado ainda hoje';
+        ? data.occupiedSlots
+            .map((s) => `${s.time} (${s.dayLabel || 'hoje'}) com ${s.dentistName} [OCUPADO]`)
+            .join(', ')
+        : 'Nenhum horário ocupado no momento';
 
+    const apptDayStr = data.patientActiveAppointment?.dayLabel || 'hoje';
     const currentPatientApptSummary = data.patientActiveAppointment
-      ? `Possui consulta ativa hoje às ${data.patientActiveAppointment.time} com ${data.patientActiveAppointment.dentistName} (${data.patientActiveAppointment.procedureName})`
-      : 'Nenhuma consulta ativa agendada para este paciente hoje';
+      ? `Possui consulta ativa para ${apptDayStr} às ${data.patientActiveAppointment.time} com ${data.patientActiveAppointment.dentistName} (${data.patientActiveAppointment.procedureName})`
+      : 'Nenhuma consulta ativa agendada para este paciente';
 
     const systemPrompt = `Você é ${data.aiAssistantName}, recepcionista da clínica odontológica "${data.clinicName}" conversando pelo WhatsApp.
 Data/Hora Atual Exata: ${now.toLocaleDateString('pt-BR')} às ${nowTimeStr}.
@@ -130,20 +151,25 @@ Dados de consulta interna (NÃO despeje tudo isso de uma vez! Use apenas quando 
 - Horários de HOJE que JÁ PASSARAM da hora atual (${nowTimeStr}) — PROIBIDO agendar ou oferecer para hoje: ${pastSlotsToday.length > 0 ? pastSlotsToday.join(', ') : 'Nenhum'}
 - Horários ainda disponíveis para HOJE (após ${nowTimeStr}): ${futureSlotsToday.length > 0 ? futureSlotsToday.join(', ') : 'Expediente de hoje encerrado (ofereça apenas para amanhã)'}
 - Horários disponíveis para AMANHÃ: 09:00, 10:30, 14:00, 16:00
-- Horários JÁ OCUPADOS na agenda de hoje (NÃO ofereça e NÃO agende nestes horários): ${occupiedSummary}
-- Status atual deste paciente (${data.patientName}, Tel: ${data.patientPhone}): ${currentPatientApptSummary}
+- Horários JÁ OCUPADOS na agenda (NÃO ofereça e NÃO agende nestes horários): ${occupiedSummary}
+- Status atual deste paciente (${firstName || 'Paciente'}, Tel: ${data.patientPhone}): ${currentPatientApptSummary}
 
-COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
+COMO CONVERSAR DE FORMA 100% HUMANA, SEM LOOPING E SEM REDUNDÂNCIA NO WHATSAPP:
 1. PROIBIDO MANDAR TEXTÃO: Responda APENAS o que o paciente perguntou naquele momento em frases curtas.
 2. UM PASSO DE CADA VEZ: Faça apenas UMA pergunta simples por vez.
-3. DIVIDA EM 2 BALÕES CURTOS USANDO "|||": Separe suas 2 mensagens curtas com "|||".
-   Exemplo: "Oi, ${firstName}! Tudo bem? 😊|||Sim, nós aceitamos Bradesco Dental para limpeza! Você prefere agendar para hoje no fim da tarde ou para amanhã?"
-4. Sem formatação de robô: NUNCA use listas com bolinhas (• ou -), nunca use asteriscos duplos (**).
-5. REGRAS CRÍTICAS DE AGENDA, HORÁRIO NO PASSADO, TRIAGEM E ÉTICA CLÍNICA:
+3. NÃO REPITA "Oi" OU SAUDAÇÃO SE JÁ HÁ HISTÓRICO: ${
+      isFirstTurn
+        ? `Como é a primeira mensagem, cumprimente de forma simpática.`
+        : `A conversa JÁ começou (${data.messageHistory.length} mensagens anteriores). É PROIBIDO começar a resposta dizendo "Oi", "Olá" ou se apresentando novamente! Vá direto ao ponto continuando o assunto.`
+    }
+4. DIVIDA EM 2 BALÕES CURTOS USANDO "|||": Separe suas 2 mensagens curtas com "|||".
+5. Sem formatação de robô: NUNCA use listas com bolinhas (• ou -), nunca use asteriscos duplos (**).
+6. REGRAS CRÍTICAS DE AGENDA, HORÁRIO NO PASSADO, TRIAGEM E ÉTICA CLÍNICA:
+   - SÓ CHAME \`bookAppointment\` SE O PACIENTE JÁ ESCOLHEU O HORÁRIO EXATO: Se o paciente apenas disse "Quero agendar uma limpeza para amanhã" sem dizer a hora, NÃO chame \`bookAppointment\`! Pergunte qual horário de amanhã ele prefere (09:00, 10:30, 14:00 ou 16:00).
    - PROIBIDO PRECIFICAR PROCEDIMENTOS (NORMA ODONTOLÓGICA): Você NUNCA deve informar preços ou valores em R$ de procedimentos pelo WhatsApp. Se perguntarem valor/preço/quanto custa, explique com simpatia que o orçamento exato é passado pelo dentista após a avaliação clínica presencial (ou conforme cobertura do convênio) e convide para agendar a avaliação.
-   - PROIBIDO AGENDAR NO PASSADO: Agora são ${nowTimeStr}. Se o paciente pedir um horário para HOJE que já passou (ex: pedir 09:00, 10:30, 14:00 ou 16:00 quando já são ${nowTimeStr}), NUNCA chame \`bookAppointment\` para hoje! Avise que já são ${nowTimeStr} e ofereça os horários que ainda restam hoje (${futureSlotsToday.join(' ou ') || 'nenhum'}) ou agendar para AMANHÃ nesse horário.
-   - NUNCA agende em um horário que já consta como OCUPADO para aquele dentista e NUNCA agende fora das 08:00 às 18:00 ou em fins de semana (sábado/domingo).
-   - Se o paciente já tem consulta ativa hoje e pedir para TROCAR/REMARCAR para outro horário livre, chame APENAS \`bookAppointment\` com o novo horário.
+   - PROIBIDO AGENDAR NO PASSADO: Agora são ${nowTimeStr}. Se o paciente pedir um horário para HOJE que já passou, NUNCA chame \`bookAppointment\` para hoje! Avise que já são ${nowTimeStr} e ofereça os horários que ainda restam hoje (${futureSlotsToday.join(' ou ') || 'nenhum'}) ou agendar para AMANHÃ nesse horário.
+   - NUNCA agende em um horário que já consta como OCUPADO e NUNCA agende fora das 08:00 às 18:00 ou em fins de semana (sábado/domingo).
+   - Se o paciente já tem consulta ativa e pedir para TROCAR/REMARCAR para outro horário livre, chame APENAS \`bookAppointment\` com o novo horário.
    - Se o paciente pedir para cancelar/desmarcar e ele tiver consulta ativa, chame \`cancelAppointment\`. Se ele NÃO tiver consulta ativa, avise que não encontrou agendamento no número dele e peça para ele confirmar o nome ou telefone.
    - TRIAGEM OBRIGATÓRIA ANTES DE TRANSFERIR PARA A RECEPÇÃO: Se o paciente disser apenas "Quero ajuda", "Preciso de ajuda", "Pode me ajudar?" ou pedir para falar com atendente/recepção SEM explicar o motivo, NUNCA chame \`requestHumanHandoff\` de imediato! Primeiro FILTRE perguntando com simpatia: se ele gostaria de agendar/remarcar uma consulta, tirar dúvida sobre convênios ou se está com alguma dor/urgência.
    - PROIBIDO RECEITAR REMÉDIOS: Você é recepcionista, não dentista. Se o paciente pedir receita de antibiótico/anti-inflamatório ou relatar dor forte, inchaço, sangramento, dente quebrado ou pós-extração, NUNCA indique medicamentos e chame IMEDIATAMENTE \`requestHumanHandoff\`.`;
@@ -164,7 +190,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         tools: {
           bookAppointment: tool({
             description:
-              'Agenda ou remarca uma consulta quando o paciente confirma ou escolhe o horário.',
+              'Agenda ou remarca uma consulta SOMENTE quando o paciente já escolheu ou confirmou um horário específico (ex: 09:00, 10:30, 14:00, 16:00). NUNCA chame se o paciente ainda não escolheu a hora.',
             parameters: z.object({
               time: z.string().describe('Horário escolhido no formato HH:mm (ex: "10:30")'),
               dentistName: z
@@ -178,7 +204,6 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
                 .describe('Número de telefone de contato do paciente'),
               dayLabel: z
                 .enum(['hoje', 'amanhã'])
-                .default('hoje')
                 .describe('Se o agendamento é para "hoje" ou para "amanhã"'),
             }),
             execute: async ({ time, dentistName, procedureName, contactPhone, dayLabel }) => {
@@ -237,8 +262,15 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         .replace(/[\u2011]/g, '-')
         .replace(/\*\*/g, '*')
         .trim();
-    } catch {
-      // Caso a chamada de tool do modelo falhe ou atinja limite de taxa, o extrator determinístico abaixo assume
+
+      // Se já estamos no meio da conversa (Turn 2+), remove cumprimentos redundantes ("Oi, Ana! " ou "Olá, Ana! ") do início da resposta da LLM
+      if (!isFirstTurn && cleanText) {
+        cleanText = cleanText
+          .replace(/^(?:oi|ol[aá]|bom dia|boa tarde|boa noite)(?:,\s*[^!.,?]+)?[!.,]\s*/i, '')
+          .trim();
+      }
+    } catch (err) {
+      console.warn('[AI Generate Fallback]:', (err as Error).message);
     }
 
     // Extrator Determinístico Pós-LLM: garante que nenhuma intenção clara de agendamento, cancelamento ou urgência passe em branco
@@ -247,6 +279,20 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       ...data.messageHistory.map((m) => m.content.toLowerCase()),
       lowerMsg,
     ].join(' ');
+    const recentHistoryText = data.messageHistory
+      .slice(-4)
+      .map((m) => m.content.toLowerCase())
+      .join(' ');
+    const lastAiMsg =
+      [...data.messageHistory]
+        .reverse()
+        .find((m) => m.sender === 'AI')
+        ?.content.toLowerCase() || '';
+    const lastPatientMsg =
+      [...data.messageHistory]
+        .reverse()
+        .find((m) => m.sender === 'PATIENT')
+        ?.content.toLowerCase() || '';
 
     // Suporta tanto "15:00" quanto "15h", "15h30", "9h", "14 hrs"
     let extractedTime: string | null = null;
@@ -264,6 +310,8 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       extractedTime = '00:00';
     } else if (lowerMsg.includes('meio-dia') || lowerMsg.includes('meio dia')) {
       extractedTime = '12:00';
+    } else if (lowerMsg.includes('primeiro horário') || lowerMsg.includes('primeiro horario')) {
+      extractedTime = '09:00';
     }
 
     const isWeekendRequested =
@@ -272,21 +320,30 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         lowerMsg.includes('sabado')) &&
       !lowerMsg.includes('abre') &&
       !lowerMsg.includes('funciona');
-    const isTomorrowRequested =
-      lowerMsg.includes('amanhã') ||
-      lowerMsg.includes('amanha') ||
-      lowerMsg.includes('próximo dia') ||
-      lowerMsg.includes('proximo dia') ||
-      lowerMsg.includes('segunda') ||
-      lowerMsg.includes('terça') ||
-      lowerMsg.includes('terca') ||
-      lowerMsg.includes('quarta') ||
-      lowerMsg.includes('quinta') ||
-      lowerMsg.includes('sexta');
     const isTodayExplicit = /\bhoje\b/i.test(lowerMsg);
+    const hasTomorrowWord = (txt: string) =>
+      txt.includes('amanhã') ||
+      txt.includes('amanha') ||
+      txt.includes('próximo dia') ||
+      txt.includes('proximo dia') ||
+      txt.includes('segunda') ||
+      txt.includes('terça') ||
+      txt.includes('terca') ||
+      txt.includes('quarta') ||
+      txt.includes('quinta') ||
+      txt.includes('sexta');
+
+    const isTomorrowInCurrentMsg = hasTomorrowWord(lowerMsg);
+    // Memória contextual de múltiplos turnos: se o turno anterior já estava tratando de "amanhã" e o paciente agora só escolheu o horário (ex: "Pode ser às 10:30")
+    const isTomorrowInRecentContext =
+      !isTodayExplicit &&
+      (hasTomorrowWord(lastPatientMsg) ||
+        lastAiMsg.includes('(amanhã)') ||
+        lastAiMsg.includes('para amanhã'));
+    const isTomorrowRequested = isTomorrowInCurrentMsg || isTomorrowInRecentContext;
 
     // Se o paciente respondeu "Pode ser amanhã" em 2 turnos após bloqueio de horário passado, recupera o horário pedido antes
-    if (isTomorrowRequested && !extractedTime && data.messageHistory.length > 0) {
+    if (isTomorrowInCurrentMsg && !extractedTime && data.messageHistory.length > 0) {
       const prevUserText = data.messageHistory
         .filter((m) => m.sender === 'PATIENT')
         .map((m) => m.content)
@@ -305,13 +362,21 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       }
     }
 
+    const hasRescheduleWord = (txt: string) =>
+      txt.includes('remarcar') ||
+      txt.includes('trocar') ||
+      txt.includes('mudar') ||
+      txt.includes('transferir') ||
+      txt.includes('alterar') ||
+      txt.includes('adiar');
+
     const isExplicitRescheduleIntent =
-      lowerMsg.includes('remarcar') ||
-      lowerMsg.includes('trocar') ||
-      lowerMsg.includes('mudar') ||
-      lowerMsg.includes('transferir') ||
-      lowerMsg.includes('alterar') ||
-      lowerMsg.includes('adiar');
+      hasRescheduleWord(lowerMsg) || hasRescheduleWord(lastPatientMsg);
+
+    // Trava contra chamada prematura de bookAppointment pela LLM quando o paciente ainda não escolheu nenhum horário
+    if (bookedAction && !extractedTime) {
+      bookedAction = null;
+    }
 
     // Normaliza o horário e o dia caso a Tool da IA tenha enviado "15h" em vez de "15:00"
     if (bookedAction && (bookedAction as any).time) {
@@ -323,7 +388,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
           '0'
         )}`;
       }
-      // Garante que a IA não mude silenciosamente para "amanhã" se o paciente não falou "amanhã"
+      // Garante que a IA respeite o contexto de hoje vs amanhã
       (bookedAction as any).dayLabel = isTodayExplicit
         ? 'hoje'
         : isTomorrowRequested
@@ -334,7 +399,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
 
     // Extrai telefone alternativo caso o paciente tenha informado um novo número no texto
     const altPhoneMatch = data.newMessage.match(
-      /(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?9?\d{4}[-\s]\d{4}/
+      /(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?9?\d{4}[-\s]?\d{4}\b/
     );
     const effectivePhone = altPhoneMatch ? altPhoneMatch[0].trim() : data.patientPhone;
     if (bookedAction && altPhoneMatch) {
@@ -346,6 +411,18 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       lowerMsg.includes('desmarcar') ||
       lowerMsg.includes('não vou poder ir') ||
       lowerMsg.includes('nao vou poder ir');
+
+    // Tratamento de Confirmação ou Troca de Telefone logo após o agendamento (evita loop!)
+    const wasAskedForPhoneConfirmation =
+      lastAiMsg.includes('seu melhor número para contato é este mesmo') ||
+      lastAiMsg.includes('melhor telefone');
+
+    const isPhoneConfirmationReply =
+      wasAskedForPhoneConfirmation &&
+      !extractedTime &&
+      !isCancelIntent &&
+      !hasRescheduleWord(lowerMsg);
+
     const isUrgentIntent =
       lowerMsg.includes('dor') ||
       lowerMsg.includes('doendo') ||
@@ -374,16 +451,24 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       lowerMsg.includes('nota fiscal') ||
       lowerMsg.includes('reembolso') ||
       lowerMsg.includes('financeiro') ||
+      lowerMsg.includes('cobrança') ||
+      lowerMsg.includes('cobranca') ||
+      lowerMsg.includes('pagamento') ||
+      lowerMsg.includes('cartão') ||
+      lowerMsg.includes('cartao') ||
       lowerMsg.includes('reclamação') ||
       lowerMsg.includes('reclamacao') ||
       lowerMsg.includes('fornecedor') ||
+      lowerMsg.includes('assunto particular') ||
+      lowerMsg.includes('assunto pessoal') ||
       ((lowerMsg.includes('atendente') ||
         lowerMsg.includes('humano') ||
         lowerMsg.includes('secretária') ||
         lowerMsg.includes('secretaria') ||
         lowerMsg.includes('recepcionista') ||
         lowerMsg.includes('recepção') ||
-        lowerMsg.includes('recepcao')) &&
+        lowerMsg.includes('recepcao') ||
+        lowerMsg.includes('pessoa')) &&
         data.messageHistory.length >= 2);
 
     const isGenericHelpOrReceptionRequest =
@@ -434,18 +519,21 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
 
     // Verifica se o paciente pediu explicitamente um(a) Dr(a). que NÃO existe na clínica
     let unknownDoctorRequested: string | null = null;
-    if (data.dentists && data.dentists.length > 0) {
-      const docMention = data.newMessage.match(
-        /\b(?:dr\.?|dra\.?|doutor|doutora)\s+([A-ZÀ-Ÿa-zà-ÿ]+)/i
+    const activeDentists =
+      data.dentists && data.dentists.length > 0
+        ? data.dentists
+        : activeClinicConfig.dentists;
+
+    const docMention = data.newMessage.match(
+      /\b(?:dr\.?|dra\.?|doutor|doutora)\s+([A-ZÀ-Ÿa-zà-ÿ]+)/i
+    );
+    if (docMention) {
+      const mentionedFirstName = docMention[1].toLowerCase();
+      const existsInClinic = activeDentists.some((d) =>
+        d.name.toLowerCase().includes(mentionedFirstName)
       );
-      if (docMention) {
-        const mentionedFirstName = docMention[1].toLowerCase();
-        const existsInClinic = data.dentists.some((d) =>
-          d.name.toLowerCase().includes(mentionedFirstName)
-        );
-        if (!existsInClinic) {
-          unknownDoctorRequested = `${docMention[0]}`;
-        }
+      if (!existsInClinic) {
+        unknownDoctorRequested = `${docMention[0]}`;
       }
     }
 
@@ -453,14 +541,24 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       bookedAction = null;
       cancelledAction = null;
       handoffAction = null;
-      cleanText = `Oi, ${firstName}! Recebi seu áudio aqui, mas o som saiu bem baixinho e não consegui ouvir direito. 😊|||Você pode gravar novamente falando um pouquinho mais perto do microfone ou me escrever por texto como posso te ajudar?`;
+      cleanText = `${greetPrefix} Recebi seu áudio aqui, mas o som saiu bem baixinho e não consegui ouvir direito. 😊|||Você pode gravar novamente falando um pouquinho mais perto do microfone ou me escrever por texto como posso te ajudar?`;
+    } else if (isPhoneConfirmationReply) {
+      bookedAction = null;
+      cancelledAction = null;
+      handoffAction = null;
+      if (altPhoneMatch) {
+        updatedContactPhone = altPhoneMatch[0].trim();
+        cleanText = `Perfeito${nameSuffix}! Já atualizei seu telefone de contato para ${updatedContactPhone} aqui na ficha da recepção. ✅|||Qualquer dúvida até o dia da sua consulta, é só me chamar por aqui. Até lá! 😊`;
+      } else {
+        cleanText = `Perfeito${nameSuffix}! Já deixei seu contato confirmado aqui na ficha da recepção. ✅|||Te esperamos na clínica! Se precisar de qualquer coisa até lá, é só me chamar. 😊`;
+      }
     } else if (isWeekendRequested) {
       bookedAction = null;
-      cleanText = `Oi, ${firstName}! Nossa clínica atende de segunda a sexta-feira, das 08:00 às 18:00 (não abrimos aos sábados e domingos). 😊|||Posso deixar agendado para você no próximo dia útil às ${extractedTime || '09:00'}?`;
+      cleanText = `${greetPrefix} Nossa clínica atende de segunda a sexta-feira, das 08:00 às 18:00 (não abrimos aos sábados e domingos). 😊|||Posso deixar agendado para você no próximo dia útil às ${extractedTime || '09:00'}?`;
     } else if (unknownDoctorRequested) {
       bookedAction = null;
-      const availableDocs = data.dentists!.map((d) => `${d.name} (${d.specialty})`).join(' e ');
-      cleanText = `Oi, ${firstName}! O(a) ${unknownDoctorRequested} não faz parte do corpo clínico aqui da nossa clínica. 😊|||Hoje nossos especialistas são: ${availableDocs}. Gostaria de agendar seu horário com algum deles?`;
+      const availableDocs = activeDentists.map((d) => `${d.name} (${d.specialty})`).join(' e ');
+      cleanText = `${greetPrefix} O(a) ${unknownDoctorRequested} não faz parte do corpo clínico aqui da nossa clínica. 😊|||Hoje nossos especialistas são: ${availableDocs}. Gostaria de agendar seu horário com algum deles?`;
     } else if (isGenericHelpOrReceptionRequest) {
       handoffAction = null;
       const askedForHumanDirectly =
@@ -472,9 +570,9 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         lowerMsg.includes('humano');
 
       if (askedForHumanDirectly) {
-        cleanText = `Oi, ${firstName}! Claro! Antes de te passar para a recepção, me conta rapidinho sobre o que seria (agendamento, dúvida de convênio/valores, financeiro ou alguma urgência/dor)? 😊|||Assim já consigo te adiantar por aqui na hora ou encaminhar seu caso filtrado para a pessoa certa!`;
+        cleanText = `${greetPrefix} Claro! Antes de te passar para a recepção, me conta rapidinho sobre o que seria (agendamento, dúvida de convênio/valores, financeiro ou alguma urgência/dor)? 😊|||Assim já consigo te adiantar por aqui na hora ou encaminhar seu caso filtrado para a pessoa certa!`;
       } else {
-        cleanText = `Oi, ${firstName}! Claro, estou aqui para te ajudar! 😊|||Me conta o que você precisa hoje: gostaria de agendar ou remarcar uma consulta, tirar dúvida sobre convênios e valores, ou está sentindo alguma dor no momento?`;
+        cleanText = `${greetPrefix} Claro, estou aqui para te ajudar! 😊|||Me conta o que você precisa hoje: gostaria de agendar ou remarcar uma consulta, tirar dúvida sobre convênios e valores, ou está sentindo alguma dor no momento?`;
       }
     } else if (!handoffAction && isUrgentIntent) {
       handoffAction = {
@@ -512,6 +610,12 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         dayLabel: isTodayExplicit ? 'hoje' : isTomorrowRequested ? 'amanhã' : 'hoje',
         isReschedule: isExplicitRescheduleIntent,
       };
+    } else if (hasRescheduleWord(lowerMsg) && !extractedTime) {
+      bookedAction = null;
+      const currentInfo = data.patientActiveAppointment
+        ? `Vi aqui que sua consulta atual está para ${data.patientActiveAppointment.dayLabel || 'hoje'} às ${data.patientActiveAppointment.time}.`
+        : `Vamos remarcar seu horário certinho!`;
+      cleanText = `Claro${nameSuffix}! ${currentInfo} 😊|||Para qual dia e horário você prefere remarcar? Para amanhã temos vaga às 09:00, 10:30, 14:00 ou 16:00.`;
     }
 
     const isPriceQuestion =
@@ -524,7 +628,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
 
     // Garante que a IA nunca precifique procedimentos com valores em R$ pelo WhatsApp
     if (isPriceQuestion && !bookedAction && !cancelledAction && !handoffAction) {
-      cleanText = `Oi, ${firstName}! Como cada tratamento odontológico depende da necessidade de cada paciente, nós não passamos valores fechados por mensagem — o orçamento é feito pelo dentista na avaliação clínica presencial. 😊|||Nós atendemos tanto particular quanto pelos convênios ${data.acceptedInsurances.join(', ')}. Gostaria de agendar um horário para sua avaliação?`;
+      cleanText = `${greetPrefix} Como cada tratamento odontológico depende da necessidade de cada paciente, nós não passamos valores fechados por mensagem — o orçamento é feito pelo dentista na avaliação clínica presencial. 😊|||Nós atendemos tanto particular quanto pelos convênios ${data.acceptedInsurances.join(', ')}. Gostaria de agendar um horário para sua avaliação?`;
     }
 
     // Validação Determinística Direta em generateDentalAiReply (cobre tanto /api/ai/live-chat quanto WhatsApp/Simulador):
@@ -536,7 +640,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       if (isNaN(bh) || bh < 8 || bh >= 18) {
         const attemptedTime = bookedAction.time;
         bookedAction = null;
-        cleanText = `Oi, ${firstName}! Nosso horário de atendimento é das 08:00 às 18:00, então às ${attemptedTime} a clínica está fechada. 😊|||${
+        cleanText = `Olha${nameSuffix}, nosso horário de atendimento é das 08:00 às 18:00, então às ${attemptedTime} a clínica está fechada. 😊|||${
           futureSlotsToday.length > 0
             ? `Para hoje ainda temos vaga às ${futureSlotsToday.join(' ou ')}, ou para amanhã às 09:00, 10:30, 14:00 e 16:00. Qual fica melhor para você?`
             : `Para amanhã temos horários disponíveis às 09:00, 10:30, 14:00 ou 16:00. Qual desses fica melhor para você?`
@@ -544,7 +648,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       } else if (bDay === 'hoje' && bTotalMin <= nowTotalMinutes) {
         const attemptedTime = bookedAction.time;
         bookedAction = null;
-        cleanText = `Oi, ${firstName}! Como agora já são ${nowTimeStr}, o horário das ${attemptedTime} de hoje já passou. 😅|||${
+        cleanText = `Olha${nameSuffix}, como agora já são ${nowTimeStr}, o horário das ${attemptedTime} de hoje já passou. 😅|||${
           futureSlotsToday.length > 0
             ? `Para hoje ainda consigo te atender às ${futureSlotsToday.join(' ou ')}, ou se preferir já deixo agendado para amanhã às ${attemptedTime}. Como fica melhor para você?`
             : `Nosso expediente de hoje já está encerrando, mas posso deixar agendado para você amanhã às ${attemptedTime}! Posso confirmar para amanhã?`
@@ -552,7 +656,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       }
     }
 
-    // Fallback inteligente caso o modelo retorne texto vazio em perguntas diretas
+    // Fallback inteligente caso o modelo retorne texto vazio em perguntas diretas ou agradecimentos
     if (!cleanText && !handoffAction && !cancelledAction && !bookedAction) {
       if (
         lowerMsg.includes('endereço') ||
@@ -560,18 +664,43 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         lowerMsg.includes('onde fica') ||
         lowerMsg.includes('localiza')
       ) {
-        cleanText = `Oi, ${firstName}! Nosso endereço é: ${data.address}. 📍|||${data.aiCustomRules} Posso te ajudar com mais alguma dúvida?`;
+        cleanText = `${greetPrefix} Nosso endereço é: ${data.address}. 📍|||${data.aiCustomRules} Posso te ajudar com mais alguma dúvida?`;
       } else if (
-        lowerMsg.includes('que horas') ||
-        lowerMsg.includes('meu horário') ||
-        lowerMsg.includes('minha consulta') ||
-        lowerMsg.includes('lembrar')
+        !hasRescheduleWord(lowerMsg) &&
+        (lowerMsg.includes('que horas') ||
+          lowerMsg.includes('meu horário') ||
+          lowerMsg.includes('minha consulta') ||
+          lowerMsg.includes('lembrar'))
       ) {
         if (data.patientActiveAppointment) {
-          cleanText = `Oi, ${firstName}! Sua consulta de hoje está confirmada para às ${data.patientActiveAppointment.time} com ${data.patientActiveAppointment.dentistName} (${data.patientActiveAppointment.procedureName}). 😊|||Estamos te aguardando!`;
+          const dLabel = data.patientActiveAppointment.dayLabel || 'hoje';
+          cleanText = `Sua consulta está confirmada para ${dLabel} às ${data.patientActiveAppointment.time} com ${data.patientActiveAppointment.dentistName} (${data.patientActiveAppointment.procedureName}). 😊|||Estamos te aguardando!`;
         } else {
-          cleanText = `Oi, ${firstName}! Ainda não consta nenhuma consulta ativa marcada para você hoje.|||Gostaria de ver os horários disponíveis para agendar?`;
+          cleanText = `Ainda não consta nenhuma consulta ativa marcada para você na agenda.|||Gostaria de ver os horários disponíveis para agendar?`;
         }
+      } else if (
+        lowerMsg.includes('agendar') ||
+        lowerMsg.includes('marcar') ||
+        lowerMsg.includes('limpeza') ||
+        lowerMsg.includes('avaliação') ||
+        lowerMsg.includes('avaliacao') ||
+        lowerMsg.includes('consulta')
+      ) {
+        if (isTomorrowRequested || futureSlotsToday.length === 0) {
+          cleanText = `${greetPrefix} Claro, vamos agendar! 😊|||Para amanhã temos horários disponíveis às 09:00, 10:30, 14:00 ou 16:00. Qual deles fica melhor para você?`;
+        } else {
+          cleanText = `${greetPrefix} Claro, vamos agendar! 😊|||Para hoje ainda temos vaga às ${futureSlotsToday.join(' ou ')}, e para amanhã às 09:00, 10:30, 14:00 ou 16:00. Qual você prefere?`;
+        }
+      } else if (
+        lowerMsg.includes('obrigad') ||
+        lowerMsg.includes('valeu') ||
+        lowerMsg.includes('até amanhã') ||
+        lowerMsg.includes('ate amanha') ||
+        lowerMsg.includes('até lá') ||
+        lowerMsg.includes('ate la') ||
+        lowerMsg.includes('tchau')
+      ) {
+        cleanText = `Por nada${nameSuffix}! 😊|||Imagina, qualquer coisa que precisar estamos à disposição. Até mais!`;
       }
     }
 
@@ -587,15 +716,15 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         lowerMsg.includes('receita');
 
       if (isMedRequest) {
-        finalReply = `Oi, ${firstName}! Sinto muito que você esteja passando por esse desconforto. Como sou da recepção, não posso indicar medicamentos por segurança.|||Já avisei nossa equipe com prioridade máxima e a nossa atendente (ou o próprio doutor) vai te chamar aqui agora mesmo para te orientar e encaixar, tá bom?`;
+        finalReply = `Sinto muito que você esteja passando por esse desconforto${nameSuffix}. Como sou da recepção, não posso indicar medicamentos por segurança.|||Já avisei nossa equipe com prioridade máxima e a nossa atendente (ou o próprio doutor) vai te chamar aqui agora mesmo para te orientar e encaixar, tá bom?`;
       } else if (isUrgentIntent) {
-        finalReply = `Oi, ${firstName}! Sinto muito que você esteja passando por isso. Já classifiquei seu atendimento como prioridade máxima aqui na clínica! 🚨|||Nossa recepção já recebeu o filtro do seu caso e vai te responder aqui agora mesmo para priorizar o seu encaixe com o doutor, tá bom?`;
+        finalReply = `Sinto muito que você esteja passando por isso${nameSuffix}. Já classifiquei seu atendimento como prioridade máxima aqui na clínica! 🚨|||Nossa recepção já recebeu o filtro do seu caso e vai te responder aqui agora mesmo para priorizar o seu encaixe com o doutor, tá bom?`;
       } else {
-        finalReply = `Perfeito, ${firstName}! Já registrei o assunto do seu contato e transferi seu atendimento para a nossa recepção. 😊|||Uma de nossas atendentes já vai assumir a conversa por aqui para te ajudar com isso!`;
+        finalReply = `Perfeito${nameSuffix}! Já registrei o assunto do seu contato e transferi seu atendimento para a nossa recepção. 😊|||Uma de nossas atendentes já vai assumir a conversa por aqui para te ajudar com isso!`;
       }
     } else if (cancelledAction) {
       const c = cancelledAction as { reason: string; contactPhone: string };
-      finalReply = `Tudo bem, ${firstName}! Já cancelei sua consulta aqui no sistema para você. 😊|||Deixei o seu número (${c.contactPhone || data.patientPhone}) salvo caso queira remarcar depois. É esse mesmo o seu melhor telefone?`;
+      finalReply = `Tudo bem${nameSuffix}! Já cancelei sua consulta aqui no sistema para você. 😊|||Deixei o seu número (${c.contactPhone || data.patientPhone}) salvo caso queira remarcar depois. É esse mesmo o seu melhor telefone?`;
     } else if (bookedAction) {
       const b = bookedAction as {
         time: string;
@@ -604,10 +733,10 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         contactPhone: string;
         dayLabel?: 'hoje' | 'amanhã';
       };
-      finalReply = `Prontinho, ${firstName}! Deixei agendada sua consulta com ${b.dentistName} para ${b.dayLabel || 'hoje'} às ${b.time}. ✅|||Só para eu deixar certinho na ficha da recepção: seu melhor número para contato é este mesmo (${b.contactPhone || data.patientPhone})?`;
+      finalReply = `Prontinho${nameSuffix}! Deixei agendada sua consulta com ${b.dentistName} para ${b.dayLabel || 'hoje'} às ${b.time}. ✅|||Só para eu deixar certinho na ficha da recepção: seu melhor número para contato é este mesmo (${b.contactPhone || data.patientPhone})?`;
     }
 
-    const bubbles = (finalReply || `Perfeito, ${firstName}! Como posso te ajudar?`)
+    const bubbles = (finalReply || `${greetPrefix} Como posso te ajudar hoje?`)
       .split(/\|\|\||\n\n+/)
       .map((b) => b.replace(/\*/g, '').trim())
       .filter(Boolean);
@@ -616,6 +745,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       provider: hasGroqKey ? 'Groq AI' : 'OpenAI (GPT-4o-mini)',
       reply: bubbles.join('\n\n'),
       bubbles,
+      updatedContactPhone,
       bookedAction,
       cancelledAction,
       handoffAction,
