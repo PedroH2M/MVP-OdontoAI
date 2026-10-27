@@ -215,9 +215,48 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       // Caso a chamada de tool do modelo falhe ou atinja limite de taxa, o extrator determinístico abaixo assume
     }
 
-    // Extrator Determinístico Pós-LLM: garante que nenhuma intenção clara de agendamento, cancelamento ou urgência passe em branco mesmo se o modelo esquecer de disparar a Tool JSON
+    // Extrator Determinístico Pós-LLM: garante que nenhuma intenção clara de agendamento, cancelamento ou urgência passe em branco
     const lowerMsg = data.newMessage.toLowerCase();
-    const timeMatch = lowerMsg.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+    const fullContextText = [
+      ...data.messageHistory.map((m) => m.content.toLowerCase()),
+      lowerMsg,
+    ].join(' ');
+
+    // Suporta tanto "15:00" quanto "15h", "15h30", "9h", "14 hrs"
+    let extractedTime: string | null = null;
+    const colonTimeMatch = lowerMsg.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+    const colloquialTimeMatch = lowerMsg.match(
+      /\b([01]?\d|2[0-3])\s*(?:h|hrs|horas)(?:\s*([0-5]\d))?\b/i
+    );
+    if (colonTimeMatch) {
+      extractedTime = `${colonTimeMatch[1].padStart(2, '0')}:${colonTimeMatch[2]}`;
+    } else if (colloquialTimeMatch) {
+      const hh = colloquialTimeMatch[1].padStart(2, '0');
+      const mm = (colloquialTimeMatch[2] || '00').padStart(2, '0');
+      extractedTime = `${hh}:${mm}`;
+    }
+
+    // Normaliza o horário caso a Tool da IA tenha enviado "15h" em vez de "15:00"
+    if (bookedAction && (bookedAction as any).time) {
+      const bTime = String((bookedAction as any).time);
+      const cMatch = bTime.match(/([01]?\d|2[0-3])\s*(?:h|:)\s*([0-5]\d)?/i);
+      if (cMatch) {
+        (bookedAction as any).time = `${cMatch[1].padStart(2, '0')}:${(cMatch[2] || '00').padStart(
+          2,
+          '0'
+        )}`;
+      }
+    }
+
+    // Extrai telefone alternativo caso o paciente tenha informado um novo número no texto
+    const altPhoneMatch = data.newMessage.match(
+      /(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?9?\d{4}[-\s]\d{4}/
+    );
+    const effectivePhone = altPhoneMatch ? altPhoneMatch[0].trim() : data.patientPhone;
+    if (bookedAction && altPhoneMatch) {
+      (bookedAction as any).contactPhone = effectivePhone;
+    }
+
     const isCancelIntent =
       lowerMsg.includes('cancelar') ||
       lowerMsg.includes('desmarcar') ||
@@ -236,8 +275,10 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       lowerMsg.includes('extração') ||
       lowerMsg.includes('extracao');
     const isBookingIntent =
-      Boolean(timeMatch) &&
+      Boolean(extractedTime) &&
       !isCancelIntent &&
+      !lowerMsg.includes('que horas') &&
+      !lowerMsg.includes('lembrar') &&
       (lowerMsg.includes('agendar') ||
         lowerMsg.includes('marcar') ||
         lowerMsg.includes('confirmar') ||
@@ -246,9 +287,37 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         lowerMsg.includes('trocar') ||
         lowerMsg.includes('remarcar') ||
         lowerMsg.includes('quero') ||
-        lowerMsg.includes('pode ser'));
+        lowerMsg.includes('pode') ||
+        lowerMsg.includes('ótimo') ||
+        lowerMsg.includes('otimo') ||
+        lowerMsg.includes('fechado') ||
+        lowerMsg.includes('combinado') ||
+        lowerMsg.includes('prefiro') ||
+        lowerMsg.includes('bom') ||
+        data.messageHistory.length > 0);
 
-    if (!handoffAction && isUrgentIntent) {
+    // Verifica se o paciente pediu explicitamente um(a) Dr(a). que NÃO existe na clínica
+    let unknownDoctorRequested: string | null = null;
+    if (data.dentists && data.dentists.length > 0) {
+      const docMention = data.newMessage.match(
+        /\b(?:dr\.?|dra\.?|doutor|doutora)\s+([A-ZÀ-Ÿa-zà-ÿ]+)/i
+      );
+      if (docMention) {
+        const mentionedFirstName = docMention[1].toLowerCase();
+        const existsInClinic = data.dentists.some((d) =>
+          d.name.toLowerCase().includes(mentionedFirstName)
+        );
+        if (!existsInClinic) {
+          unknownDoctorRequested = `${docMention[0]}`;
+        }
+      }
+    }
+
+    if (unknownDoctorRequested) {
+      bookedAction = null;
+      const availableDocs = data.dentists!.map((d) => `${d.name} (${d.specialty})`).join(' e ');
+      cleanText = `Oi, ${firstName}! O(a) ${unknownDoctorRequested} não faz parte do corpo clínico aqui da nossa clínica. 😊|||Hoje nossos especialistas são: ${availableDocs}. Gostaria de agendar seu horário com algum deles?`;
+    } else if (!handoffAction && isUrgentIntent) {
       handoffAction = {
         reason: `Paciente relatou urgência/medicação: "${data.newMessage}"`,
         urgency: 'HIGH',
@@ -256,27 +325,58 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
     } else if (!cancelledAction && isCancelIntent) {
       cancelledAction = {
         reason: data.newMessage,
-        contactPhone: data.patientPhone,
+        contactPhone: effectivePhone,
       };
-    } else if (!bookedAction && isBookingIntent && timeMatch) {
+    } else if (!bookedAction && isBookingIntent && extractedTime) {
       const chosenDentist =
         data.dentists?.find((d) =>
-          lowerMsg.includes(d.name.split(' ')[1]?.toLowerCase() || d.name.toLowerCase())
+          fullContextText.includes(d.name.split(' ')[1]?.toLowerCase() || d.name.toLowerCase())
         )?.name ||
         data.patientActiveAppointment?.dentistName ||
         data.dentists?.[0]?.name ||
         'Plantonista da Clínica';
-      const chosenProc = lowerMsg.includes('limpeza')
+      const chosenProc = fullContextText.includes('limpeza')
         ? 'Limpeza'
-        : lowerMsg.includes('avalia')
+        : fullContextText.includes('avalia')
         ? 'Avaliação Inicial'
         : data.patientActiveAppointment?.procedureName || 'Consulta';
       bookedAction = {
-        time: timeMatch[0],
+        time: extractedTime,
         dentistName: chosenDentist,
         procedureName: chosenProc,
-        contactPhone: data.patientPhone,
+        contactPhone: effectivePhone,
       };
+    }
+
+    // Fallback inteligente caso o modelo retorne texto vazio em perguntas diretas
+    if (!cleanText && !handoffAction && !cancelledAction && !bookedAction) {
+      if (
+        lowerMsg.includes('endereço') ||
+        lowerMsg.includes('endereco') ||
+        lowerMsg.includes('onde fica') ||
+        lowerMsg.includes('localiza')
+      ) {
+        cleanText = `Oi, ${firstName}! Nosso endereço é: ${data.address}. 📍|||${data.aiCustomRules} Posso te ajudar com mais alguma dúvida?`;
+      } else if (
+        lowerMsg.includes('que horas') ||
+        lowerMsg.includes('meu horário') ||
+        lowerMsg.includes('minha consulta') ||
+        lowerMsg.includes('lembrar')
+      ) {
+        if (data.patientActiveAppointment) {
+          cleanText = `Oi, ${firstName}! Sua consulta de hoje está confirmada para às ${data.patientActiveAppointment.time} com ${data.patientActiveAppointment.dentistName} (${data.patientActiveAppointment.procedureName}). 😊|||Estamos te aguardando!`;
+        } else {
+          cleanText = `Oi, ${firstName}! Ainda não consta nenhuma consulta ativa marcada para você hoje.|||Gostaria de ver os horários disponíveis para agendar?`;
+        }
+      } else if (
+        lowerMsg.includes('valor') ||
+        lowerMsg.includes('preço') ||
+        lowerMsg.includes('preco') ||
+        lowerMsg.includes('grátis') ||
+        lowerMsg.includes('gratis')
+      ) {
+        cleanText = `Oi, ${firstName}! Nossos valores particulares são: Avaliação Inicial R$ 150, Limpeza R$ 250 e Consulta de Urgência R$ 200. 😊|||Também atendemos pelos convênios ${data.acceptedInsurances.join(', ')}. Gostaria de agendar um horário?`;
+      }
     }
 
     let finalReply = cleanText;
