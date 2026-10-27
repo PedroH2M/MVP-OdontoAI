@@ -68,6 +68,7 @@ export type AiReplyGenerator = (input: {
     dentistName: string;
     procedureName: string;
     contactPhone: string;
+    dayLabel?: 'hoje' | 'amanhã';
   } | null;
   cancelledAction: {
     reason: string;
@@ -415,20 +416,55 @@ class BaileysSessionService {
       const normalizedTime = `${String(isNaN(hh) ? 11 : hh).padStart(2, '0')}:${String(
         isNaN(mm) ? 0 : mm
       ).padStart(2, '0')}`;
+      const dayLabel: 'hoje' | 'amanhã' =
+        aiResult.bookedAction.dayLabel === 'amanhã' ? 'amanhã' : 'hoje';
+
+      const now = new Date();
+      const nowTotalMinutes = now.getHours() * 60 + now.getMinutes();
+      const requestedTotalMinutes = (isNaN(hh) ? 11 : hh) * 60 + (isNaN(mm) ? 0 : mm);
+      const futureSlotsToday = ['09:00', '10:30', '14:00', '16:00', '17:15', '17:30'].filter(
+        (slot) => {
+          const [sh, sm] = slot.split(':').map(Number);
+          return sh * 60 + sm > nowTotalMinutes;
+        }
+      );
 
       // REGRA 1: Fora do horário de funcionamento (08:00 às 18:00)
       if (isNaN(hh) || hh < 8 || hh >= 18) {
         aiResult.bookedAction = null;
         const msg1 = `Oi, ${firstName}! Nosso horário de atendimento é das 08:00 às 18:00, então às ${rawTime} a clínica está fechada. 😊`;
-        const msg2 = `Temos horários disponíveis às 09:00, 10:30, 14:00 ou 16:00. Qual desses fica melhor para você?`;
+        const msg2 =
+          futureSlotsToday.length > 0
+            ? `Para hoje ainda temos vaga às ${futureSlotsToday.join(' ou ')}, ou para amanhã às 09:00, 10:30, 14:00 e 16:00. Qual fica melhor para você?`
+            : `Para amanhã temos horários disponíveis às 09:00, 10:30, 14:00 ou 16:00. Qual desses fica melhor para você?`;
         aiResult.bubbles = [msg1, msg2];
         aiResult.reply = `${msg1}\n\n${msg2}`;
         return;
       }
 
+      // REGRA 1.5: Bloqueio de Agendamento no Passado (ex: pedir hoje às 09:00 quando já são 16:55)
+      if (dayLabel === 'hoje' && requestedTotalMinutes <= nowTotalMinutes) {
+        const nowStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        aiResult.bookedAction = null;
+        const msg1 = `Oi, ${firstName}! Como agora já são ${nowStr}, o horário das ${normalizedTime} de hoje já passou. 😅`;
+        const msg2 =
+          futureSlotsToday.length > 0
+            ? `Para hoje ainda consigo te atender às ${futureSlotsToday.join(' ou ')}, ou se preferir já deixo agendado para amanhã às ${normalizedTime}. Como fica melhor para você?`
+            : `Nosso expediente de hoje já está encerrando, mas posso deixar agendado para você amanhã às ${normalizedTime}! Posso confirmar para amanhã?`;
+        aiResult.bubbles = [msg1, msg2];
+        aiResult.reply = `${msg1}\n\n${msg2}`;
+        return;
+      }
+
+      const targetDate = new Date();
+      if (dayLabel === 'amanhã') {
+        targetDate.setDate(targetDate.getDate() + 1);
+      }
+      targetDate.setHours(hh, isNaN(mm) ? 0 : mm, 0, 0);
+
       const targetDentist = (aiResult.bookedAction.dentistName || '').trim().toLowerCase();
 
-      // REGRA 2: Verifica se OUTRO paciente já ocupou esse mesmo horário com esse mesmo dentista
+      // REGRA 2: Verifica se OUTRO paciente já ocupou esse mesmo horário e dia com esse mesmo dentista
       const conflictingAppt = this.liveAppointments.find((a) => {
         if (a.status === 'CANCELLED') return false;
         const isSamePatient =
@@ -436,7 +472,9 @@ class BaileysSessionService {
           a.patient.phone.replace(/\D/g, '') === cleanPatientPhone;
         if (isSamePatient) return false;
 
-        const apptTime = new Date(a.startTime).toLocaleTimeString('pt-BR', {
+        const apptDateObj = new Date(a.startTime);
+        const sameDay = apptDateObj.toDateString() === targetDate.toDateString();
+        const apptTime = apptDateObj.toLocaleTimeString('pt-BR', {
           hour: '2-digit',
           minute: '2-digit',
         });
@@ -444,15 +482,19 @@ class BaileysSessionService {
         const sameDentist =
           a.dentistName.toLowerCase().includes(targetDentist) ||
           targetDentist.includes(a.dentistName.toLowerCase());
-        return sameTime && sameDentist;
+        return sameDay && sameTime && sameDentist;
       });
 
       if (conflictingAppt) {
-        const standardSlots = ['09:00', '10:30', '14:00', '16:00'];
+        const candidatePool =
+          dayLabel === 'hoje' && futureSlotsToday.length > 0
+            ? futureSlotsToday
+            : ['09:00', '10:30', '14:00', '16:00', '17:15'];
         const occupiedForDentist = this.liveAppointments
           .filter(
             (a) =>
               a.status !== 'CANCELLED' &&
+              new Date(a.startTime).toDateString() === targetDate.toDateString() &&
               (a.dentistName.toLowerCase().includes(targetDentist) ||
                 targetDentist.includes(a.dentistName.toLowerCase()))
           )
@@ -462,20 +504,20 @@ class BaileysSessionService {
               minute: '2-digit',
             })
           );
-        const freeSlots = standardSlots.filter((s) => !occupiedForDentist.includes(s));
+        const freeSlots = candidatePool.filter((s) => !occupiedForDentist.includes(s));
         const suggestion =
-          freeSlots.length > 0 ? freeSlots.slice(0, 2).join(' ou ') : '14:30 ou 16:30';
+          freeSlots.length > 0 ? freeSlots.slice(0, 2).join(' ou ') : 'amanhã às 09:00 ou 14:00';
 
         const dName = aiResult.bookedAction.dentistName;
         aiResult.bookedAction = null;
-        const msg1 = `Ops, ${firstName}! Acabei de checar na agenda e o horário das ${normalizedTime} com ${dName} já foi preenchido hoje. 😅`;
-        const msg2 = `Mas ainda tenho vaga livre com ${dName} às ${suggestion}. Algum desses dois horários fica bom para você?`;
+        const msg1 = `Ops, ${firstName}! Acabei de checar na agenda e o horário das ${normalizedTime} (${dayLabel}) com ${dName} já foi preenchido. 😅`;
+        const msg2 = `Mas ainda tenho vaga livre com ${dName} às ${suggestion}. Algum desses fica bom para você?`;
         aiResult.bubbles = [msg1, msg2];
         aiResult.reply = `${msg1}\n\n${msg2}`;
         return;
       }
 
-      // REGRA 3: Se o MESMO paciente já tinha um horário ativo hoje, é uma REMARCAÇÃO (cancela o anterior para não duplicar!)
+      // REGRA 3: Se o MESMO paciente já tinha um horário ativo, é uma REMARCAÇÃO (cancela o anterior para não duplicar!)
       const previousActiveAppt = this.liveAppointments.find(
         (a) =>
           a.status !== 'CANCELLED' &&
@@ -489,8 +531,7 @@ class BaileysSessionService {
         );
       }
 
-      const start = new Date();
-      start.setHours(hh, isNaN(mm) ? 0 : mm, 0, 0);
+      const start = targetDate;
       const end = new Date(start.getTime() + 30 * 60000);
       const savedPhone = aiResult.bookedAction.contactPhone || conv.patient.phone;
 
@@ -511,8 +552,8 @@ class BaileysSessionService {
 
       // Garante confirmação humanizada em 2 balões + validação do número de contato salvo
       const msg1 = previousActiveAppt
-        ? `Prontinho, ${firstName}! Já remarquei sua consulta para hoje às ${normalizedTime} com ${aiResult.bookedAction.dentistName}. ✅`
-        : `Prontinho, ${firstName}! Deixei agendada sua consulta (${aiResult.bookedAction.procedureName}) com ${aiResult.bookedAction.dentistName} para hoje às ${normalizedTime}. ✅`;
+        ? `Prontinho, ${firstName}! Já remarquei sua consulta para ${dayLabel} às ${normalizedTime} com ${aiResult.bookedAction.dentistName}. ✅`
+        : `Prontinho, ${firstName}! Deixei agendada sua consulta (${aiResult.bookedAction.procedureName}) com ${aiResult.bookedAction.dentistName} para ${dayLabel} às ${normalizedTime}. ✅`;
       const msg2 = `Só para eu deixar salvo certinho na ficha da recepção: seu melhor número para contato é este mesmo (${savedPhone})?`;
 
       aiResult.bubbles = [msg1, msg2];
