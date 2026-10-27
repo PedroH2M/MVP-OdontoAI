@@ -121,11 +121,12 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
 3. DIVIDA EM 2 BALÕES CURTOS USANDO "|||": Separe suas 2 mensagens curtas com "|||".
    Exemplo: "Oi, ${firstName}! Tudo bem? 😊|||Sim, nós aceitamos Bradesco Dental para limpeza! Você prefere agendar na parte da manhã ou da tarde?"
 4. Sem formatação de robô: NUNCA use listas com bolinhas (• ou -), nunca use asteriscos duplos (**).
-5. REGRAS CRÍTICAS DE AGENDA E ÉTICA CLÍNICA:
+5. REGRAS CRÍTICAS DE AGENDA, TRIAGEM E ÉTICA CLÍNICA:
    - NUNCA agende em um horário que já consta como OCUPADO para aquele dentista e NUNCA agende fora das 08:00 às 18:00.
    - Se o paciente já tem consulta ativa hoje e pedir para TROCAR/REMARCAR para outro horário livre, chame APENAS \`bookAppointment\` com o novo horário (o sistema já substitui o antigo automaticamente).
    - Se o paciente pedir para cancelar/desmarcar e ele tiver consulta ativa, chame \`cancelAppointment\`. Se ele NÃO tiver consulta ativa, avise que não encontrou agendamento no número dele e peça para ele confirmar o nome ou telefone.
-   - PROIBIDO RECEITAR REMÉDIOS: Você é recepcionista, não dentista. Se o paciente pedir receita de antibiótico/anti-inflamatório ou relatar dor forte, inchaço, sangramento ou pós-extração, NUNCA indique medicamentos e chame IMEDIATAMENTE \`requestHumanHandoff\`.`;
+   - TRIAGEM OBRIGATÓRIA ANTES DE TRANSFERIR PARA A RECEPÇÃO: Se o paciente disser apenas "Quero ajuda", "Preciso de ajuda", "Pode me ajudar?" ou pedir para falar com atendente/recepção SEM explicar o motivo, NUNCA chame \`requestHumanHandoff\` de imediato! Primeiro FILTRE perguntando com simpatia: se ele gostaria de agendar/remarcar uma consulta, tirar dúvida sobre convênios/valores ou se está com alguma dor/urgência.
+   - PROIBIDO RECEITAR REMÉDIOS: Você é recepcionista, não dentista. Se o paciente pedir receita de antibiótico/anti-inflamatório ou relatar dor forte, inchaço, sangramento, dente quebrado ou pós-extração, NUNCA indique medicamentos e chame IMEDIATAMENTE \`requestHumanHandoff\`.`;
 
     let cleanText = '';
 
@@ -188,7 +189,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
           }),
           requestHumanHandoff: tool({
             description:
-              'Transfere para a recepcionista humana em caso de dor aguda, inchaço, pós-extração, pedido de receita de medicamento ou urgência.',
+              'Transfere para a recepcionista humana SOMENTE após filtrar o motivo e confirmar que é dor aguda, inchaço, sangramento, dente quebrado, pós-extração, pedido de receita de medicamento ou assunto financeiro específico. NUNCA chame se o paciente apenas disse "Quero ajuda" ou "Preciso de ajuda" sem especificar o que é.',
             parameters: z.object({
               reason: z.string().describe('Resumo do motivo da urgência para a secretária'),
               urgency: z.enum(['HIGH', 'NORMAL']).describe('Nível de urgência'),
@@ -265,15 +266,67 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
     const isUrgentIntent =
       lowerMsg.includes('dor') ||
       lowerMsg.includes('doendo') ||
+      lowerMsg.includes('latej') ||
       lowerMsg.includes('inchad') ||
-      lowerMsg.includes('sangrando') ||
+      lowerMsg.includes('inchaço') ||
+      lowerMsg.includes('sangr') ||
+      lowerMsg.includes('pus') ||
+      lowerMsg.includes('infecc') ||
+      lowerMsg.includes('infecção') ||
+      lowerMsg.includes('inflam') ||
+      lowerMsg.includes('quebr') ||
       lowerMsg.includes('antibiótico') ||
       lowerMsg.includes('antibiotico') ||
       lowerMsg.includes('anti-inflamatório') ||
       lowerMsg.includes('remédio') ||
       lowerMsg.includes('remedio') ||
+      lowerMsg.includes('receita') ||
       lowerMsg.includes('extração') ||
-      lowerMsg.includes('extracao');
+      lowerMsg.includes('extracao') ||
+      lowerMsg.includes('pós-operatório') ||
+      lowerMsg.includes('pos-operatorio');
+
+    const isSpecificAdminOrHumanAfterTriage =
+      lowerMsg.includes('boleto') ||
+      lowerMsg.includes('nota fiscal') ||
+      lowerMsg.includes('reembolso') ||
+      lowerMsg.includes('financeiro') ||
+      lowerMsg.includes('reclamação') ||
+      lowerMsg.includes('reclamacao') ||
+      lowerMsg.includes('fornecedor') ||
+      ((lowerMsg.includes('atendente') ||
+        lowerMsg.includes('humano') ||
+        lowerMsg.includes('secretária') ||
+        lowerMsg.includes('secretaria') ||
+        lowerMsg.includes('recepcionista') ||
+        lowerMsg.includes('recepção') ||
+        lowerMsg.includes('recepcao')) &&
+        data.messageHistory.length >= 2);
+
+    const isGenericHelpOrReceptionRequest =
+      !isUrgentIntent &&
+      !isSpecificAdminOrHumanAfterTriage &&
+      !isCancelIntent &&
+      !extractedTime &&
+      (lowerMsg.includes('ajuda') ||
+        lowerMsg.includes('ajudar') ||
+        lowerMsg.includes('socorro') ||
+        lowerMsg.includes('dúvida') ||
+        lowerMsg.includes('duvida') ||
+        lowerMsg.includes('atendente') ||
+        lowerMsg.includes('recepção') ||
+        lowerMsg.includes('recepcao') ||
+        lowerMsg.includes('secretária') ||
+        lowerMsg.includes('secretaria') ||
+        lowerMsg.includes('humano') ||
+        lowerMsg.includes('falar com alguém') ||
+        lowerMsg.includes('falar com alguem'));
+
+    // TRAVA DE TRIAGEM: Se a IA tentou transferir para a recepção sem o cliente ter explicado o problema (ex: "Quero ajuda"), bloqueia o handoff e filtra primeiro!
+    if (handoffAction && !isUrgentIntent && !isSpecificAdminOrHumanAfterTriage) {
+      handoffAction = null;
+    }
+
     const isBookingIntent =
       Boolean(extractedTime) &&
       !isCancelIntent &&
@@ -313,14 +366,39 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       }
     }
 
-    if (unknownDoctorRequested) {
+    if (lowerMsg.includes('[paciente enviou um áudio baixo/inaudível]')) {
+      bookedAction = null;
+      cancelledAction = null;
+      handoffAction = null;
+      cleanText = `Oi, ${firstName}! Recebi seu áudio aqui, mas o som saiu bem baixinho e não consegui ouvir direito. 😊|||Você pode gravar novamente falando um pouquinho mais perto do microfone ou me escrever por texto como posso te ajudar?`;
+    } else if (unknownDoctorRequested) {
       bookedAction = null;
       const availableDocs = data.dentists!.map((d) => `${d.name} (${d.specialty})`).join(' e ');
       cleanText = `Oi, ${firstName}! O(a) ${unknownDoctorRequested} não faz parte do corpo clínico aqui da nossa clínica. 😊|||Hoje nossos especialistas são: ${availableDocs}. Gostaria de agendar seu horário com algum deles?`;
+    } else if (isGenericHelpOrReceptionRequest) {
+      handoffAction = null;
+      const askedForHumanDirectly =
+        lowerMsg.includes('atendente') ||
+        lowerMsg.includes('recepção') ||
+        lowerMsg.includes('recepcao') ||
+        lowerMsg.includes('secretária') ||
+        lowerMsg.includes('secretaria') ||
+        lowerMsg.includes('humano');
+
+      if (askedForHumanDirectly) {
+        cleanText = `Oi, ${firstName}! Claro! Antes de te passar para a recepção, me conta rapidinho sobre o que seria (agendamento, dúvida de convênio/valores, financeiro ou alguma urgência/dor)? 😊|||Assim já consigo te adiantar por aqui na hora ou encaminhar seu caso filtrado para a pessoa certa!`;
+      } else {
+        cleanText = `Oi, ${firstName}! Claro, estou aqui para te ajudar! 😊|||Me conta o que você precisa hoje: gostaria de agendar ou remarcar uma consulta, tirar dúvida sobre convênios e valores, ou está sentindo alguma dor no momento?`;
+      }
     } else if (!handoffAction && isUrgentIntent) {
       handoffAction = {
         reason: `Paciente relatou urgência/medicação: "${data.newMessage}"`,
         urgency: 'HIGH',
+      };
+    } else if (!handoffAction && isSpecificAdminOrHumanAfterTriage) {
+      handoffAction = {
+        reason: `Solicitação filtrada para recepção: "${data.newMessage}"`,
+        urgency: 'NORMAL',
       };
     } else if (!cancelledAction && isCancelIntent) {
       cancelledAction = {
@@ -382,7 +460,21 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
     let finalReply = cleanText;
 
     if (handoffAction) {
-      finalReply = `Oi, ${firstName}! Sinto muito que você esteja passando por esse desconforto. Como sou da recepção, não posso indicar medicamentos por segurança.|||Já avisei nossa equipe com prioridade máxima e a nossa atendente (ou o próprio doutor) vai te chamar aqui agora mesmo para te orientar e encaixar, tá bom?`;
+      const isMedRequest =
+        lowerMsg.includes('remédio') ||
+        lowerMsg.includes('remedio') ||
+        lowerMsg.includes('antibiótico') ||
+        lowerMsg.includes('antibiotico') ||
+        lowerMsg.includes('anti-inflamatório') ||
+        lowerMsg.includes('receita');
+
+      if (isMedRequest) {
+        finalReply = `Oi, ${firstName}! Sinto muito que você esteja passando por esse desconforto. Como sou da recepção, não posso indicar medicamentos por segurança.|||Já avisei nossa equipe com prioridade máxima e a nossa atendente (ou o próprio doutor) vai te chamar aqui agora mesmo para te orientar e encaixar, tá bom?`;
+      } else if (isUrgentIntent) {
+        finalReply = `Oi, ${firstName}! Sinto muito que você esteja passando por isso. Já classifiquei seu atendimento como prioridade máxima aqui na clínica! 🚨|||Nossa recepção já recebeu o filtro do seu caso e vai te responder aqui agora mesmo para priorizar o seu encaixe com o doutor, tá bom?`;
+      } else {
+        finalReply = `Perfeito, ${firstName}! Já registrei o assunto do seu contato e transferi seu atendimento para a nossa recepção. 😊|||Uma de nossas atendentes já vai assumir a conversa por aqui para te ajudar com isso!`;
+      }
     } else if (cancelledAction) {
       const c = cancelledAction as { reason: string; contactPhone: string };
       finalReply = `Tudo bem, ${firstName}! Já cancelei sua consulta aqui no sistema para você. 😊|||Deixei o seu número (${c.contactPhone || data.patientPhone}) salvo caso queira remarcar depois. É esse mesmo o seu melhor telefone?`;
@@ -461,7 +553,10 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       phone: z.string().default('11 99999-8888'),
       patientName: z.string().default('Lucas Martins'),
       insuranceName: z.string().optional(),
-      text: z.string().min(1),
+      text: z.string().optional(),
+      mediaType: z.enum(['text', 'audio']).optional(),
+      audioBase64: z.string().optional(),
+      audioMimeType: z.string().optional(),
     });
     try {
       const body = schema.parse(request.body);

@@ -2,12 +2,14 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
   WASocket,
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import path from 'path';
 import fs from 'fs';
+import { audioTranscriptionService } from './audio-transcription.service.js';
 
 export interface LiveWhatsAppMessage {
   id: string;
@@ -207,13 +209,13 @@ class BaileysSessionService {
             msg.message.documentWithCaptionMessage?.message ||
             msg.message;
 
-          const text =
+          const audioMsg = innerMsg?.audioMessage;
+          let text =
             innerMsg?.conversation ||
             innerMsg?.extendedTextMessage?.text ||
             innerMsg?.imageMessage?.caption ||
             '';
-
-          if (!text.trim()) continue;
+          let mediaType: 'text' | 'audio' = 'text';
 
           const cleanPhone = remoteJid.replace(/@.*$/, '');
           const ownPhone = this.connectedPhone || '';
@@ -223,9 +225,56 @@ class BaileysSessionService {
             (ownPhone && remoteJid.includes(ownPhone)) ||
             (ownLid && remoteJid.includes(ownLid));
 
+          // Se for mensagem de áudio/voz no WhatsApp Real, baixa o buffer e transcreve via Groq Whisper
+          if (audioMsg && !text.trim()) {
+            try {
+              console.log(`🎤 [WhatsApp Real] Áudio recebido de ${remoteJid}. Baixando e transcrevendo...`);
+              const audioBuffer = (await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                {
+                  logger: pino({ level: 'silent' }) as any,
+                  reuploadRequest: sock.updateMediaMessage,
+                }
+              )) as Buffer;
+
+              const transcription = await audioTranscriptionService.transcribeAudioBuffer(
+                audioBuffer,
+                audioMsg.mimetype || 'audio/ogg'
+              );
+
+              if (transcription.text) {
+                text = transcription.text;
+                mediaType = 'audio';
+                console.log(
+                  `✅ [WhatsApp Real - Áudio Transcrito] De: ${remoteJid} | Texto: "${text}"`
+                );
+              } else {
+                console.warn(
+                  `⚠️ [WhatsApp Real - Áudio] Não foi possível transcrever (${transcription.error})`
+                );
+                if (!msg.key.fromMe || isSelfChat || this.activeTestJids.has(remoteJid)) {
+                  text = '[Paciente enviou um áudio baixo/inaudível]';
+                  mediaType = 'audio';
+                }
+              }
+            } catch (audioErr) {
+              console.error(
+                '[Baileys Audio] Erro ao baixar/transcrever áudio:',
+                (audioErr as Error).message
+              );
+            }
+          }
+
+          if (!text.trim()) continue;
+
           const lower = text.toLowerCase();
           const hasExplicitTrigger =
+            this.activeTestJids.has(remoteJid) ||
+            mediaType === 'audio' ||
             lower.includes('sofia') ||
+            lower.includes('ajuda') ||
             lower.includes('consulta') ||
             lower.includes('dentista') ||
             lower.includes('limpeza') ||
@@ -238,10 +287,13 @@ class BaileysSessionService {
             lower.includes('dor') ||
             lower.includes('clínica') ||
             lower.includes('clinica') ||
-            lower.includes('avaliação');
+            lower.includes('avaliação') ||
+            lower.includes('avaliacao') ||
+            lower.includes('convênio') ||
+            lower.includes('convenio');
 
           console.log(
-            `📩 [WhatsApp Real] De: ${remoteJid} | fromMe: ${msg.key.fromMe} | Texto: "${text}"`
+            `📩 [WhatsApp Real] De: ${remoteJid} | fromMe: ${msg.key.fromMe} | Tipo: ${mediaType} | Texto: "${text}"`
           );
 
           if (msg.key.fromMe && !isSelfChat && !hasExplicitTrigger) {
@@ -251,7 +303,13 @@ class BaileysSessionService {
           this.activeTestJids.add(remoteJid);
 
           const patientName = msg.pushName || `Cliente (${cleanPhone.slice(-4)})`;
-          await this.handleRealIncomingMessage(remoteJid, cleanPhone, patientName, text.trim());
+          await this.handleRealIncomingMessage(
+            remoteJid,
+            cleanPhone,
+            patientName,
+            text.trim(),
+            mediaType
+          );
         }
       });
     } catch (err) {
@@ -506,10 +564,25 @@ class BaileysSessionService {
     phone: string;
     patientName: string;
     insuranceName?: string;
-    text: string;
+    text?: string;
+    mediaType?: 'text' | 'audio';
+    audioBase64?: string;
+    audioMimeType?: string;
   }) {
     const cleanPhone = input.phone.replace(/\D/g, '') || '11999998888';
     const remoteJid = `sim-${cleanPhone}@simulator.local`;
+
+    let effectiveText = (input.text || '').trim();
+    let effectiveMediaType: 'text' | 'audio' = input.mediaType || 'text';
+
+    if (input.audioBase64) {
+      effectiveMediaType = 'audio';
+      const transcribed = await audioTranscriptionService.transcribeBase64Audio(
+        input.audioBase64,
+        input.audioMimeType || 'audio/ogg'
+      );
+      effectiveText = transcribed;
+    }
 
     let conv = this.liveConversations.get(remoteJid);
     if (!conv) {
@@ -537,14 +610,17 @@ class BaileysSessionService {
 
     const historyForAi = conv.messages.map((m) => ({
       sender: m.sender,
-      content: m.content,
+      content: m.content.replace(/^🎤 \[Áudio\]: "/, '').replace(/"$/, ''),
     }));
+
+    const displayContent =
+      effectiveMediaType === 'audio' ? `🎤 [Áudio]: "${effectiveText}"` : effectiveText;
 
     conv.messages.push({
       id: `pat-${Date.now()}`,
       sender: 'PATIENT',
-      content: input.text,
-      mediaType: 'text',
+      content: displayContent,
+      mediaType: effectiveMediaType,
       createdAt: new Date().toISOString(),
     });
     conv.lastMessageAt = new Date().toISOString();
@@ -563,7 +639,7 @@ class BaileysSessionService {
       patientName: conv.patient.name,
       patientPhone: conv.patient.phone,
       messageHistory: historyForAi,
-      newMessage: input.text,
+      newMessage: effectiveText,
       occupiedSlots,
       patientActiveAppointment,
     });
@@ -622,7 +698,8 @@ class BaileysSessionService {
     remoteJid: string,
     phone: string,
     patientName: string,
-    text: string
+    text: string,
+    mediaType: 'text' | 'audio' = 'text'
   ) {
     let conv = this.liveConversations.get(remoteJid);
     if (!conv) {
@@ -646,14 +723,16 @@ class BaileysSessionService {
 
     const historyForAi = conv.messages.map((m) => ({
       sender: m.sender,
-      content: m.content,
+      content: m.content.replace(/^🎤 \[Áudio\]: "/, '').replace(/"$/, ''),
     }));
+
+    const displayContent = mediaType === 'audio' ? `🎤 [Áudio]: "${text}"` : text;
 
     conv.messages.push({
       id: `pat-${Date.now()}`,
       sender: 'PATIENT',
-      content: text,
-      mediaType: 'text',
+      content: displayContent,
+      mediaType,
       createdAt: new Date().toISOString(),
     });
     conv.lastMessageAt = new Date().toISOString();
