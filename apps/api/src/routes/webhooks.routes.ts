@@ -79,6 +79,8 @@ export async function webhooksRoutes(app: FastifyInstance) {
       procedureName: string;
       contactPhone: string;
       dayLabel?: 'hoje' | 'amanhã';
+      dateOffsetDays?: number;
+      isReschedule?: boolean;
     } | null = null;
     let cancelledAction: {
       reason: string;
@@ -130,7 +132,6 @@ Dados de consulta interna (NÃO despeje tudo isso de uma vez! Use apenas quando 
 - Horários disponíveis para AMANHÃ: 09:00, 10:30, 14:00, 16:00
 - Horários JÁ OCUPADOS na agenda de hoje (NÃO ofereça e NÃO agende nestes horários): ${occupiedSummary}
 - Status atual deste paciente (${data.patientName}, Tel: ${data.patientPhone}): ${currentPatientApptSummary}
-- Valores particulares base: Avaliação (R$ 150), Limpeza (R$ 250), Urgência (R$ 200)
 
 COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
 1. PROIBIDO MANDAR TEXTÃO: Responda APENAS o que o paciente perguntou naquele momento em frases curtas.
@@ -139,11 +140,12 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
    Exemplo: "Oi, ${firstName}! Tudo bem? 😊|||Sim, nós aceitamos Bradesco Dental para limpeza! Você prefere agendar para hoje no fim da tarde ou para amanhã?"
 4. Sem formatação de robô: NUNCA use listas com bolinhas (• ou -), nunca use asteriscos duplos (**).
 5. REGRAS CRÍTICAS DE AGENDA, HORÁRIO NO PASSADO, TRIAGEM E ÉTICA CLÍNICA:
+   - PROIBIDO PRECIFICAR PROCEDIMENTOS (NORMA ODONTOLÓGICA): Você NUNCA deve informar preços ou valores em R$ de procedimentos pelo WhatsApp. Se perguntarem valor/preço/quanto custa, explique com simpatia que o orçamento exato é passado pelo dentista após a avaliação clínica presencial (ou conforme cobertura do convênio) e convide para agendar a avaliação.
    - PROIBIDO AGENDAR NO PASSADO: Agora são ${nowTimeStr}. Se o paciente pedir um horário para HOJE que já passou (ex: pedir 09:00, 10:30, 14:00 ou 16:00 quando já são ${nowTimeStr}), NUNCA chame \`bookAppointment\` para hoje! Avise que já são ${nowTimeStr} e ofereça os horários que ainda restam hoje (${futureSlotsToday.join(' ou ') || 'nenhum'}) ou agendar para AMANHÃ nesse horário.
    - NUNCA agende em um horário que já consta como OCUPADO para aquele dentista e NUNCA agende fora das 08:00 às 18:00 ou em fins de semana (sábado/domingo).
-   - Se o paciente já tem consulta ativa hoje e pedir para TROCAR/REMARCAR para outro horário livre, chame APENAS \`bookAppointment\` com o novo horário (o sistema já substitui o antigo automaticamente).
+   - Se o paciente já tem consulta ativa hoje e pedir para TROCAR/REMARCAR para outro horário livre, chame APENAS \`bookAppointment\` com o novo horário.
    - Se o paciente pedir para cancelar/desmarcar e ele tiver consulta ativa, chame \`cancelAppointment\`. Se ele NÃO tiver consulta ativa, avise que não encontrou agendamento no número dele e peça para ele confirmar o nome ou telefone.
-   - TRIAGEM OBRIGATÓRIA ANTES DE TRANSFERIR PARA A RECEPÇÃO: Se o paciente disser apenas "Quero ajuda", "Preciso de ajuda", "Pode me ajudar?" ou pedir para falar com atendente/recepção SEM explicar o motivo, NUNCA chame \`requestHumanHandoff\` de imediato! Primeiro FILTRE perguntando com simpatia: se ele gostaria de agendar/remarcar uma consulta, tirar dúvida sobre convênios/valores ou se está com alguma dor/urgência.
+   - TRIAGEM OBRIGATÓRIA ANTES DE TRANSFERIR PARA A RECEPÇÃO: Se o paciente disser apenas "Quero ajuda", "Preciso de ajuda", "Pode me ajudar?" ou pedir para falar com atendente/recepção SEM explicar o motivo, NUNCA chame \`requestHumanHandoff\` de imediato! Primeiro FILTRE perguntando com simpatia: se ele gostaria de agendar/remarcar uma consulta, tirar dúvida sobre convênios ou se está com alguma dor/urgência.
    - PROIBIDO RECEITAR REMÉDIOS: Você é recepcionista, não dentista. Se o paciente pedir receita de antibiótico/anti-inflamatório ou relatar dor forte, inchaço, sangramento, dente quebrado ou pós-extração, NUNCA indique medicamentos e chame IMEDIATAMENTE \`requestHumanHandoff\`.`;
 
     let cleanText = '';
@@ -303,6 +305,14 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
       }
     }
 
+    const isExplicitRescheduleIntent =
+      lowerMsg.includes('remarcar') ||
+      lowerMsg.includes('trocar') ||
+      lowerMsg.includes('mudar') ||
+      lowerMsg.includes('transferir') ||
+      lowerMsg.includes('alterar') ||
+      lowerMsg.includes('adiar');
+
     // Normaliza o horário e o dia caso a Tool da IA tenha enviado "15h" em vez de "15:00"
     if (bookedAction && (bookedAction as any).time) {
       const bTime = String((bookedAction as any).time);
@@ -319,6 +329,7 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         : isTomorrowRequested
         ? 'amanhã'
         : 'hoje';
+      (bookedAction as any).isReschedule = isExplicitRescheduleIntent;
     }
 
     // Extrai telefone alternativo caso o paciente tenha informado um novo número no texto
@@ -499,7 +510,21 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         procedureName: chosenProc,
         contactPhone: effectivePhone,
         dayLabel: isTodayExplicit ? 'hoje' : isTomorrowRequested ? 'amanhã' : 'hoje',
+        isReschedule: isExplicitRescheduleIntent,
       };
+    }
+
+    const isPriceQuestion =
+      lowerMsg.includes('valor') ||
+      lowerMsg.includes('preço') ||
+      lowerMsg.includes('preco') ||
+      lowerMsg.includes('quanto custa') ||
+      lowerMsg.includes('orçamento') ||
+      lowerMsg.includes('orcamento');
+
+    // Garante que a IA nunca precifique procedimentos com valores em R$ pelo WhatsApp
+    if (isPriceQuestion && !bookedAction && !cancelledAction && !handoffAction) {
+      cleanText = `Oi, ${firstName}! Como cada tratamento odontológico depende da necessidade de cada paciente, nós não passamos valores fechados por mensagem — o orçamento é feito pelo dentista na avaliação clínica presencial. 😊|||Nós atendemos tanto particular quanto pelos convênios ${data.acceptedInsurances.join(', ')}. Gostaria de agendar um horário para sua avaliação?`;
     }
 
     // Validação Determinística Direta em generateDentalAiReply (cobre tanto /api/ai/live-chat quanto WhatsApp/Simulador):
@@ -547,14 +572,6 @@ COMO CONVERSAR DE FORMA 100% HUMANA E SEGURA NO WHATSAPP (MUITO IMPORTANTE):
         } else {
           cleanText = `Oi, ${firstName}! Ainda não consta nenhuma consulta ativa marcada para você hoje.|||Gostaria de ver os horários disponíveis para agendar?`;
         }
-      } else if (
-        lowerMsg.includes('valor') ||
-        lowerMsg.includes('preço') ||
-        lowerMsg.includes('preco') ||
-        lowerMsg.includes('grátis') ||
-        lowerMsg.includes('gratis')
-      ) {
-        cleanText = `Oi, ${firstName}! Nossos valores particulares são: Avaliação Inicial R$ 150, Limpeza R$ 250 e Consulta de Urgência R$ 200. 😊|||Também atendemos pelos convênios ${data.acceptedInsurances.join(', ')}. Gostaria de agendar um horário?`;
       }
     }
 

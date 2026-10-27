@@ -69,6 +69,8 @@ export type AiReplyGenerator = (input: {
     procedureName: string;
     contactPhone: string;
     dayLabel?: 'hoje' | 'amanhã';
+    dateOffsetDays?: number;
+    isReschedule?: boolean;
   } | null;
   cancelledAction: {
     reason: string;
@@ -457,20 +459,23 @@ class BaileysSessionService {
       }
 
       const targetDate = new Date();
-      if (dayLabel === 'amanhã') {
-        targetDate.setDate(targetDate.getDate() + 1);
+      const offsetDays =
+        typeof aiResult.bookedAction.dateOffsetDays === 'number'
+          ? aiResult.bookedAction.dateOffsetDays
+          : dayLabel === 'amanhã'
+          ? 1
+          : 0;
+      if (offsetDays !== 0) {
+        targetDate.setDate(targetDate.getDate() + offsetDays);
       }
       targetDate.setHours(hh, isNaN(mm) ? 0 : mm, 0, 0);
 
       const targetDentist = (aiResult.bookedAction.dentistName || '').trim().toLowerCase();
 
-      // REGRA 2: Verifica se OUTRO paciente já ocupou esse mesmo horário e dia com esse mesmo dentista
+      // REGRA 2: Verifica se JÁ EXISTE agendamento ativo nesse mesmo dia e horário (inclusive do mesmo número!)
+      // NUNCA cancela o agendamento anterior em caso de conflito: informa que o horário não está disponível!
       const conflictingAppt = this.liveAppointments.find((a) => {
         if (a.status === 'CANCELLED') return false;
-        const isSamePatient =
-          a.patient.id === conv.patient.id ||
-          a.patient.phone.replace(/\D/g, '') === cleanPatientPhone;
-        if (isSamePatient) return false;
 
         const apptDateObj = new Date(a.startTime);
         const sameDay = apptDateObj.toDateString() === targetDate.toDateString();
@@ -479,10 +484,20 @@ class BaileysSessionService {
           minute: '2-digit',
         });
         const sameTime = apptTime === normalizedTime;
+        if (!sameDay || !sameTime) return false;
+
+        const existingDentist = (a.dentistName || '').trim().toLowerCase();
+        const isGenericDentist =
+          existingDentist.includes('plantonista') ||
+          targetDentist.includes('plantonista') ||
+          existingDentist.includes('profissional') ||
+          targetDentist.includes('profissional');
         const sameDentist =
-          a.dentistName.toLowerCase().includes(targetDentist) ||
-          targetDentist.includes(a.dentistName.toLowerCase());
-        return sameDay && sameTime && sameDentist;
+          isGenericDentist ||
+          existingDentist.includes(targetDentist) ||
+          targetDentist.includes(existingDentist);
+
+        return sameDentist;
       });
 
       if (conflictingAppt) {
@@ -490,13 +505,11 @@ class BaileysSessionService {
           dayLabel === 'hoje' && futureSlotsToday.length > 0
             ? futureSlotsToday
             : ['09:00', '10:30', '14:00', '16:00', '17:15'];
-        const occupiedForDentist = this.liveAppointments
+        const occupiedOnTargetDay = this.liveAppointments
           .filter(
             (a) =>
               a.status !== 'CANCELLED' &&
-              new Date(a.startTime).toDateString() === targetDate.toDateString() &&
-              (a.dentistName.toLowerCase().includes(targetDentist) ||
-                targetDentist.includes(a.dentistName.toLowerCase()))
+              new Date(a.startTime).toDateString() === targetDate.toDateString()
           )
           .map((a) =>
             new Date(a.startTime).toLocaleTimeString('pt-BR', {
@@ -504,26 +517,29 @@ class BaileysSessionService {
               minute: '2-digit',
             })
           );
-        const freeSlots = candidatePool.filter((s) => !occupiedForDentist.includes(s));
+        const freeSlots = candidatePool.filter((s) => !occupiedOnTargetDay.includes(s));
         const suggestion =
           freeSlots.length > 0 ? freeSlots.slice(0, 2).join(' ou ') : 'amanhã às 09:00 ou 14:00';
 
         const dName = aiResult.bookedAction.dentistName;
         aiResult.bookedAction = null;
-        const msg1 = `Ops, ${firstName}! Acabei de checar na agenda e o horário das ${normalizedTime} (${dayLabel}) com ${dName} já foi preenchido. 😅`;
-        const msg2 = `Mas ainda tenho vaga livre com ${dName} às ${suggestion}. Algum desses fica bom para você?`;
+        const msg1 = `Ops, ${firstName}! Acabei de verificar na agenda e o horário das ${normalizedTime} (${dayLabel}) não está disponível pois já está ocupado. 😅`;
+        const msg2 = `Mas ainda tenho horário disponível com ${dName} às ${suggestion}. Algum desses fica bom para você?`;
         aiResult.bubbles = [msg1, msg2];
         aiResult.reply = `${msg1}\n\n${msg2}`;
         return;
       }
 
-      // REGRA 3: Se o MESMO paciente já tinha um horário ativo, é uma REMARCAÇÃO (cancela o anterior para não duplicar!)
-      const previousActiveAppt = this.liveAppointments.find(
-        (a) =>
-          a.status !== 'CANCELLED' &&
-          (a.patient.id === conv.patient.id ||
-            a.patient.phone.replace(/\D/g, '') === cleanPatientPhone)
-      );
+      // REGRA 3: Só substitui um agendamento anterior do mesmo paciente se ele pediu EXPLICITAMENTE para remarcar/trocar para um NOVO horário livre!
+      const isExplicitReschedule = Boolean(aiResult.bookedAction.isReschedule);
+      const previousActiveAppt = isExplicitReschedule
+        ? this.liveAppointments.find(
+            (a) =>
+              a.status !== 'CANCELLED' &&
+              (a.patient.id === conv.patient.id ||
+                a.patient.phone.replace(/\D/g, '') === cleanPatientPhone)
+          )
+        : null;
 
       if (previousActiveAppt) {
         this.liveAppointments = this.liveAppointments.map((a) =>

@@ -27,6 +27,8 @@ import {
   Lock,
   RefreshCw,
   Phone,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import {
   API_BASE_URL,
@@ -73,6 +75,14 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
+function toLocalYmd(input: Date | string) {
+  const d = typeof input === 'string' ? new Date(input) : input;
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function ToothIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
     <svg
@@ -102,6 +112,8 @@ export default function OdontoAiCompleteWorkspace() {
   const [activeTab, setActiveTab] = useState<'today' | 'inbox' | 'dentists' | 'settings'>('today');
   const [clinic, setClinic] = useState<Clinic>(DEMO_CLINIC);
   const [selectedDentistFilter, setSelectedDentistFilter] = useState<string>('ALL');
+  const [selectedAgendaDate, setSelectedAgendaDate] = useState<string>(() => toLocalYmd(new Date()));
+  const [viewAllAgendaDays, setViewAllAgendaDays] = useState<boolean>(false);
 
   // Estado inicial limpo (sem agendamentos nem conversas fictícias pré-cadastradas)
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
@@ -137,6 +149,7 @@ export default function OdontoAiCompleteWorkspace() {
     insuranceName: 'Particular',
     dentistId: '',
     procedureId: DEMO_CLINIC.procedures[0].id,
+    date: toLocalYmd(new Date()),
     startTime: '10:30',
   });
 
@@ -444,22 +457,66 @@ export default function OdontoAiCompleteWorkspace() {
     link.href = faviconHref;
   }, [clinic.name, brandColor]);
 
+  const todayYmd = toLocalYmd(new Date());
+  const tomorrowDateObj = new Date();
+  tomorrowDateObj.setDate(tomorrowDateObj.getDate() + 1);
+  const tomorrowYmd = toLocalYmd(tomorrowDateObj);
+  const yesterdayDateObj = new Date();
+  yesterdayDateObj.setDate(yesterdayDateObj.getDate() - 1);
+  const yesterdayYmd = toLocalYmd(yesterdayDateObj);
+
+  const shiftAgendaDate = (deltaDays: number) => {
+    const [y, m, d] = selectedAgendaDate.split('-').map(Number);
+    const base = new Date(y, (m || 1) - 1, d || 1);
+    base.setDate(base.getDate() + deltaDays);
+    const nextYmd = toLocalYmd(base);
+    setSelectedAgendaDate(nextYmd);
+    setViewAllAgendaDays(false);
+  };
+
+  const selectedDateDisplayObj = (() => {
+    const [y, m, d] = selectedAgendaDate.split('-').map(Number);
+    return new Date(y, (m || 1) - 1, d || 1);
+  })();
+
+  const selectedDayRelativeLabel = viewAllAgendaDays
+    ? 'Todos os Dias'
+    : selectedAgendaDate === todayYmd
+    ? 'Hoje'
+    : selectedAgendaDate === tomorrowYmd
+    ? 'Amanhã'
+    : selectedAgendaDate === yesterdayYmd
+    ? 'Ontem'
+    : selectedDateDisplayObj.toLocaleDateString('pt-BR', { weekday: 'long' });
+
+  const appointmentsForSelectedScope = viewAllAgendaDays
+    ? appointments
+    : appointments.filter((a) => toLocalYmd(a.startTime) === selectedAgendaDate);
+
   const activeAppointments = appointments.filter((a) => a.status !== 'CANCELLED');
-  const cancelledAppointments = appointments.filter((a) => a.status === 'CANCELLED');
+  const activeScopedAppointments = appointmentsForSelectedScope.filter(
+    (a) => a.status !== 'CANCELLED'
+  );
+  const cancelledScopedAppointments = appointmentsForSelectedScope.filter(
+    (a) => a.status === 'CANCELLED'
+  );
   const filteredAppointments =
     selectedDentistFilter === 'CANCELLED'
-      ? cancelledAppointments
-      : activeAppointments.filter(
+      ? cancelledScopedAppointments
+      : activeScopedAppointments.filter(
           (a) => selectedDentistFilter === 'ALL' || a.dentist.id === selectedDentistFilter
         );
 
-  const confirmedCount = activeAppointments.filter(
+  const confirmedCount = activeScopedAppointments.filter(
     (a) => a.status === 'CONFIRMED' || a.status === 'COMPLETED'
   ).length;
-  const aiBookedCount = activeAppointments.filter((a) => a.bookedByAi).length;
-  const aiRevenue = activeAppointments
-    .filter((a) => a.bookedByAi)
-    .reduce((acc, a) => acc + Number(a.procedure.price || 200), 0);
+  const aiBookedCount = activeScopedAppointments.filter((a) => a.bookedByAi).length;
+  const todayActiveCount = activeAppointments.filter(
+    (a) => toLocalYmd(a.startTime) === todayYmd
+  ).length;
+  const tomorrowActiveCount = activeAppointments.filter(
+    (a) => toLocalYmd(a.startTime) === tomorrowYmd
+  ).length;
 
   const handleToggleMasterBot = () => {
     const nextState = !clinic.isBotActive;
@@ -807,9 +864,26 @@ export default function OdontoAiCompleteWorkspace() {
     const procedure =
       clinic.procedures.find((p) => p.id === bookingForm.procedureId) || clinic.procedures[0];
     const [hh, mm] = bookingForm.startTime.split(':').map(Number);
-    const start = new Date();
-    start.setHours(hh, mm, 0, 0);
+    const targetYmd = bookingForm.date || selectedAgendaDate || todayYmd;
+    const [yy, mo, dd] = targetYmd.split('-').map(Number);
+    const start = new Date(yy, (mo || 1) - 1, dd || 1, hh, mm, 0, 0);
     const end = new Date(start.getTime() + procedure.durationMinutes * 60000);
+
+    // Verifica se já existe agendamento ativo no mesmo dia e horário
+    const hasConflict = appointments.some((a) => {
+      if (a.status === 'CANCELLED') return false;
+      const sameDay = toLocalYmd(a.startTime) === targetYmd;
+      const apptTime = new Date(a.startTime).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      return sameDay && apptTime === bookingForm.startTime && a.dentist.name === dentist.name;
+    });
+
+    if (hasConflict) {
+      showToast(`⚠️ O horário das ${bookingForm.startTime} já está ocupado nesta data!`);
+      return;
+    }
 
     setAppointments((prev) => [
       ...prev,
@@ -830,6 +904,8 @@ export default function OdontoAiCompleteWorkspace() {
         procedure,
       },
     ]);
+    setSelectedAgendaDate(targetYmd);
+    setViewAllAgendaDays(false);
     setIsBookingModalOpen(false);
     setBookingForm((prev) => ({ ...prev, patientName: '', patientPhone: '' }));
     showToast('Consulta adicionada à agenda');
@@ -966,7 +1042,7 @@ export default function OdontoAiCompleteWorkspace() {
             >
               <span className="flex items-center gap-3">
                 <Calendar className="w-4 h-4" />
-                Agenda do Dia
+                Agenda
               </span>
               <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white text-slate-600 shadow-sm">
                 {activeAppointments.length}
@@ -1093,35 +1169,135 @@ export default function OdontoAiCompleteWorkspace() {
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold text-slate-900">Visão de Hoje</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-bold text-slate-900 capitalize">
+                    Agenda — {selectedDayRelativeLabel}
+                  </h2>
+                  {!viewAllAgendaDays && selectedAgendaDate !== todayYmd && (
+                    <button
+                      onClick={() => {
+                        setSelectedAgendaDate(todayYmd);
+                        setViewAllAgendaDays(false);
+                      }}
+                      className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-slate-200/70 text-slate-700 hover:bg-slate-200 transition"
+                    >
+                      Voltar para Hoje
+                    </button>
+                  )}
+                </div>
                 <p className="text-xs text-slate-500 mt-0.5 capitalize">
-                  {new Date().toLocaleDateString('pt-BR', {
-                    weekday: 'long',
-                    day: 'numeric',
-                    month: 'long',
-                  })}
+                  {viewAllAgendaDays
+                    ? 'Exibindo agendamentos de todas as datas'
+                    : selectedDateDisplayObj.toLocaleDateString('pt-BR', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                      })}
                 </p>
               </div>
 
-              <button
-                onClick={() => setIsBookingModalOpen(true)}
-                style={{ backgroundColor: brandColor }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl hover:opacity-95 text-white text-xs font-semibold shadow-sm transition"
-              >
-                <Plus className="w-4 h-4" />
-                Novo Agendamento
-              </button>
+              {/* Barra de Navegação entre Dias (Dias Anteriores / Hoje / Amanhã / Próximos Dias) */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center bg-white border border-slate-200/80 rounded-xl p-1 shadow-xs">
+                  <button
+                    type="button"
+                    onClick={() => shiftAgendaDate(-1)}
+                    title="Dia Anterior"
+                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <input
+                    type="date"
+                    value={selectedAgendaDate}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setSelectedAgendaDate(e.target.value);
+                        setViewAllAgendaDays(false);
+                      }
+                    }}
+                    className="text-xs font-semibold text-slate-800 px-2 py-1 focus:outline-none cursor-pointer"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => shiftAgendaDate(1)}
+                    title="Próximo Dia"
+                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex items-center bg-slate-200/70 p-1 rounded-xl text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAgendaDate(todayYmd);
+                      setViewAllAgendaDays(false);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg transition ${
+                      !viewAllAgendaDays && selectedAgendaDate === todayYmd
+                        ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Hoje ({todayActiveCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAgendaDate(tomorrowYmd);
+                      setViewAllAgendaDays(false);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg transition ${
+                      !viewAllAgendaDays && selectedAgendaDate === tomorrowYmd
+                        ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Amanhã ({tomorrowActiveCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewAllAgendaDays(true)}
+                    className={`px-2.5 py-1 rounded-lg transition ${
+                      viewAllAgendaDays
+                        ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Todos ({activeAppointments.length})
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setBookingForm((prev) => ({ ...prev, date: selectedAgendaDate }));
+                    setIsBookingModalOpen(true);
+                  }}
+                  style={{ backgroundColor: brandColor }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl hover:opacity-95 text-white text-xs font-semibold shadow-sm transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  Novo Agendamento
+                </button>
+              </div>
             </div>
 
-            {/* 3 Cards de Resumo Equilibrados */}
+            {/* 3 Cards Operacionais (Sem precificação / receita pela IA) */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-medium text-slate-400">Pacientes Hoje</span>
+                  <span className="text-xs font-medium text-slate-400">
+                    Pacientes ({selectedDayRelativeLabel})
+                  </span>
                   <div className="text-2xl font-bold text-slate-900 mt-1">
                     {confirmedCount}{' '}
                     <span className="text-sm font-normal text-slate-400">
-                      / {activeAppointments.length} confirmados
+                      / {activeScopedAppointments.length} confirmados
                     </span>
                   </div>
                 </div>
@@ -1150,9 +1326,12 @@ export default function OdontoAiCompleteWorkspace() {
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-medium text-slate-400">Receita via IA (Hoje)</span>
+                  <span className="text-xs font-medium text-slate-400">Triagem no WhatsApp</span>
                   <div className="text-2xl font-bold text-emerald-600 mt-1">
-                    R$ {aiRevenue.toLocaleString('pt-BR')}
+                    {conversations.length}{' '}
+                    <span className="text-sm font-normal text-slate-400">
+                      {conversations.length === 1 ? 'conversa ativa' : 'conversas ativas'}
+                    </span>
                   </div>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
@@ -1166,7 +1345,7 @@ export default function OdontoAiCompleteWorkspace() {
               <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
                   <h3 className="font-semibold text-sm text-slate-900">
-                    Horários Agendados
+                    Horários Agendados ({selectedDayRelativeLabel})
                   </h3>
 
                   <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
@@ -1193,7 +1372,7 @@ export default function OdontoAiCompleteWorkspace() {
                         {d.name.split(' ').slice(0, 2).join(' ')}
                       </button>
                     ))}
-                    {cancelledAppointments.length > 0 && (
+                    {cancelledScopedAppointments.length > 0 && (
                       <button
                         onClick={() => setSelectedDentistFilter('CANCELLED')}
                         className={`px-3 py-1 rounded-lg transition ${
@@ -1202,7 +1381,7 @@ export default function OdontoAiCompleteWorkspace() {
                             : 'text-rose-600 hover:bg-rose-50'
                         }`}
                       >
-                        Cancelados ({cancelledAppointments.length})
+                        Cancelados ({cancelledScopedAppointments.length})
                       </button>
                     )}
                   </div>
@@ -1216,10 +1395,10 @@ export default function OdontoAiCompleteWorkspace() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-slate-700">
-                          Nenhum agendamento registrado hoje
+                          Nenhum agendamento para {selectedDayRelativeLabel.toLowerCase()}
                         </p>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          Novas consultas marcadas pela IA no WhatsApp ou manualmente aparecerão aqui.
+                          Use as setas acima para navegar entre os dias anteriores e posteriores.
                         </p>
                       </div>
                     </div>
@@ -1230,9 +1409,14 @@ export default function OdontoAiCompleteWorkspace() {
                           new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
                       )
                       .map((appt) => {
-                        const timeStart = new Date(appt.startTime).toLocaleTimeString('pt-BR', {
+                        const apptDateObj = new Date(appt.startTime);
+                        const timeStart = apptDateObj.toLocaleTimeString('pt-BR', {
                           hour: '2-digit',
                           minute: '2-digit',
+                        });
+                        const shortDateStr = apptDateObj.toLocaleDateString('pt-BR', {
+                          day: '2-digit',
+                          month: '2-digit',
                         });
                         const isConfirmed = appt.status === 'CONFIRMED';
                         const isCompleted = appt.status === 'COMPLETED';
@@ -1244,14 +1428,14 @@ export default function OdontoAiCompleteWorkspace() {
                           >
                             <div className="flex items-center gap-4">
                               <div
-                                className="w-16 pl-3 border-l-[3px]"
+                                className="w-20 pl-3 border-l-[3px]"
                                 style={{ borderColor: appt.dentist.color }}
                               >
                                 <div className="text-sm font-bold text-slate-900">
                                   {timeStart}
                                 </div>
                                 <div className="text-[11px] text-slate-400">
-                                  {appt.procedure.durationMinutes} min
+                                  {shortDateStr} • {appt.procedure.durationMinutes}m
                                 </div>
                               </div>
 
@@ -1740,7 +1924,7 @@ export default function OdontoAiCompleteWorkspace() {
                       <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                         <span>Horário: Seg a Sex (08:00 às 18:00)</span>
                         <span className="font-semibold text-slate-700">
-                          {count} pacientes hoje
+                          {count} agendamentos ativos
                         </span>
                       </div>
                     </div>
@@ -2218,19 +2402,42 @@ export default function OdontoAiCompleteWorkspace() {
                   </option>
                 ))}
               </select>
-              <select
-                value={bookingForm.startTime}
-                onChange={(e) =>
-                  setBookingForm((prev) => ({ ...prev, startTime: e.target.value }))
-                }
-                className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2 bg-white"
-              >
-                {['09:00', '10:30', '13:30', '15:00', '17:00'].map((t) => (
-                  <option key={t} value={t}>
-                    Horário livre: {t}
-                  </option>
-                ))}
-              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    Data da Consulta
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={bookingForm.date}
+                    onChange={(e) =>
+                      setBookingForm((prev) => ({ ...prev, date: e.target.value }))
+                    }
+                    className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    Horário
+                  </label>
+                  <select
+                    value={bookingForm.startTime}
+                    onChange={(e) =>
+                      setBookingForm((prev) => ({ ...prev, startTime: e.target.value }))
+                    }
+                    className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 bg-white"
+                  >
+                    {['09:00', '10:30', '13:30', '14:00', '15:00', '16:00', '17:00', '17:30'].map(
+                      (t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </div>
+              </div>
 
               <button
                 type="submit"
