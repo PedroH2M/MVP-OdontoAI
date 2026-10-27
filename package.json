@@ -8,6 +8,7 @@
     "apps/*"
   ],
   "scripts": {
+    "postinstall": "npm --workspace=@odonto-ai/database run db:generate",
     "db:generate": "npm --workspace=@odonto-ai/database run db:generate",
     "db:push": "npm --workspace=@odonto-ai/database run db:push",
     "db:seed": "npm --workspace=@odonto-ai/database run db:seed",

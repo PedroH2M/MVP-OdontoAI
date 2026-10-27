@@ -1,69 +1,67 @@
 # 🦷 OdontoAI SaaS — Recepcionista Virtual IA & Gestão de Agenda
 
-Plataforma Multi-tenant B2B para Clínicas Odontológicas que automatiza o atendimento no WhatsApp (texto e áudio), consulta horários livres de forma 100% determinística, realiza agendamentos sem conflito, envia lembretes 24h antes (Anti-No-Show) e transfere emergências para a recepcionista humana.
+Plataforma SaaS White-Label para Clínicas Odontológicas que automatiza o atendimento no WhatsApp, realiza agendamentos determinísticos sem conflito de horário, gerencia cancelamentos e remarcações, confirma telefone de contato e transfere casos de urgência/dor para a recepcionista humana.
 
 ---
 
-## 🏗️ Arquitetura em 6 Blocos
+## 🔗 Endereços do Sistema
 
-1. **Bloco 1 — Banco de Dados Multi-tenant (`packages/database`)**: Prisma + PostgreSQL com isolamento por `clinicId`, grades de horário com intervalo de almoço, catálogo de procedimentos e histórico de conversas.
-2. **Bloco 2 — Motor de Agenda Determinística (`apps/api/src/modules/scheduling`)**: Cálculo exato de janelas disponíveis (`SlotCalculatorService`) + trava distribuída no Redis (`AppointmentBookingService`) contra *double booking*.
-3. **Bloco 3 — Pipeline de WhatsApp, Áudio & Debounce (`apps/api/src/modules/whatsapp`)**: Integração Evolution API, transcrição de áudios via Whisper (Groq/OpenAI), agrupamento de mensagens picadas com Debounce de 6 segundos no BullMQ e pausa automática quando a secretária responde pelo celular.
-4. **Bloco 4 — Orquestrador de IA & Tools (`apps/api/src/modules/ai`)**: System Prompt com tabela temporal de 14 dias + 4 Zod Tools + Motor Local Custo Zero para testes gratuitos + Worker de lembrete 24h.
-5. **Bloco 5 — API Fastify (`apps/api/src/routes`)**: Rotas de ROI executivo, agenda, inbox em tempo real e simulador de WhatsApp.
-6. **Bloco 6 — Painel Web Moderno & Clean (`apps/web`)**: Interface em Next.js + TailwindCSS desenhada para recepcionistas e dentistas.
+| Ambiente | URL Local | Função |
+| :--- | :--- | :--- |
+| **Painel Oficial (Cliente Final)** | **`http://localhost:3000`** | Interface limpa para a Clínica (Agenda do Dia, WhatsApp da Recepção, Cadastro de Profissionais, Personalização White-Label e Conexão QR Code). |
+| **Painel Oculto de Testes (Dev/QA)** | **`http://localhost:3000/simulador`** | Simulador standalone de WhatsApp com celular virtual, cenários de 1 clique e inspector de `Tool Calls` (não requer celular conectado). |
+| **Servidor Backend (API Fastify)** | **`http://localhost:3333`** | Motor de IA (Groq), regras determinísticas de agenda e conector nativo de WhatsApp (`@whiskeysockets/baileys`). |
 
 ---
 
-## 🚀 Como Rodar o Projeto no seu Computador
+## 🚀 Como Rodar em Outro PC (Passo a Passo Rápido)
 
-### 1. Instalar dependências (na raiz do monorepo)
+Você **não precisa de Docker** para rodar o painel, a IA e o conector de WhatsApp Real. Basta ter o **Node.js** instalado:
+
+### 1. Clonar o repositório e instalar as dependências
 ```bash
-cd C:\Users\pedro.miguel\odonto-ai-saas
+git clone https://github.com/PedroH2M/MVP-OdontoAI.git
+cd MVP-OdontoAI
 npm install
 ```
+*(O comando `npm install` já executa automaticamente o `prisma generate` via script `postinstall`).*
 
-### 2. Testar o Painel Visual Imediatamente (Modo Demo Interativo — Sem precisar de Docker)
-Você pode abrir o Frontend direto mesmo antes de subir o banco de dados:
+### 2. Configurar a chave da IA (Groq)
+Copie o arquivo de exemplo `.env.example` para `.env`:
 ```bash
-npm run dev:web
-```
-Acesse **`http://localhost:3000`** no navegador. Clique no botão **"Simular Paciente no WhatsApp"** no topo direito para testar os 3 cenários (Dúvida de horários, Agendamento automático e Transbordo de Urgência/Dor).
-
-### 3. Subir o Sistema Completo (Banco PostgreSQL + Redis + API + Frontend)
-Se tiver o Docker Desktop instalado:
-```bash
-# 1. Sobe PostgreSQL e Redis
-docker compose up -d
-
-# 2. Cria o arquivo .env na raiz (copiando de .env.example)
 copy .env.example .env
+```
+Abra o arquivo `.env` e cole a sua chave gratuita da Groq ([console.groq.com](https://console.groq.com)):
+```env
+GROQ_API_KEY="gsk_sua_chave_aqui"
+```
 
-# 3. Gera o Prisma Client, cria as tabelas e popula a Clínica Sorriso Perfeito
-npm run db:generate
-npm run db:push
-npm run db:seed
+### 3. Iniciar o Backend e o Frontend
+Abra dois terminais na pasta do projeto:
 
-# 4. Inicia a API (porta 3333) e o Painel Web (porta 3000)
+**Terminal 1 (API na porta 3333):**
+```bash
 npm run dev:api
+```
+
+**Terminal 2 (Painel Web na porta 3000):**
+```bash
 npm run dev:web
 ```
 
 ---
 
-## 🔑 Como Configurar as Chaves de IA e WhatsApp para Produção
+## 📲 Como Conectar um WhatsApp Real
+1. Acesse **`http://localhost:3000`**.
+2. No menu lateral inferior esquerdo, clique em **Conectar QR Code**.
+3. No seu celular, abra o WhatsApp em **Aparelhos Conectados > Conectar um aparelho** e escaneie o QR Code exibido na tela.
+4. Para desconectar ou trocar de número a qualquer momento, clique novamente em **WhatsApp Conectado > Desconectar / Gerar Novo QR Code**.
 
-### Passo 1: Chave da OpenAI (`gpt-4o-mini`)
-1. Acesse [platform.openai.com](https://platform.openai.com/) e crie sua conta.
-2. Vá em **Settings > Billing** e adicione **$5 USD** (crédito mínimo que dura milhares de conversas).
-3. Vá em **API Keys > Create new secret key**, copie a chave `sk-...` e cole em `OPENAI_API_KEY` no seu arquivo `.env`.
+---
 
-### Passo 2: Chave da Groq para Transcrição de Áudio Ultrarrápida (Gratuita)
-1. Acesse [console.groq.com](https://console.groq.com/) e crie uma conta gratuita.
-2. Gere uma API Key (`gsk_...`) e cole em `GROQ_API_KEY` no arquivo `.env`.
-
-### Passo 3: Conectar o WhatsApp da Clínica (Evolution API)
-1. Suba uma instância da **Evolution API** (via Docker) ou use um gateway como Z-API.
-2. Crie uma instância com o nome configurado na clínica (ex: `instancia-sorriso-perfeito`).
-3. Configure o Webhook da instância apontando para `https://seu-dominio-api.com/webhooks/whatsapp` (evento `MESSAGES_UPSERT`).
-4. A secretária da clínica lê o QR Code no WhatsApp da clínica e o bot começa a atender imediatamente!
+## 🛡️ Regras de Negócio e Segurança Clínica Validadas (QA)
+- **Anti-Overbooking Determinístico**: Impede que dois pacientes agendem no mesmo horário com o mesmo profissional, sugerindo automaticamente os horários livres restantes.
+- **Remarcação Inteligente**: Quando um paciente pede para mudar seu horário, o sistema cancela o horário antigo e confirma o novo sem duplicar o agendamento.
+- **Cancelamento Verificado**: Confirma se o paciente realmente possui consulta ativa antes de cancelar e salva o telefone de contato para retorno da recepção.
+- **Validação de Corpo Clínico**: Só permite agendar com os dentistas cadastrados pela clínica na aba **Profissionais**.
+- **Trava de Segurança Clínica**: Nunca receita medicamentos (antibióticos/anti-inflamatórios) e aciona transbordo humano imediato (`WAITING_HUMAN`) em casos de dor aguda, inchaço ou pós-operatório.
