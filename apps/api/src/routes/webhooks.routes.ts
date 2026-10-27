@@ -7,39 +7,40 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { prisma } from '@odonto-ai/database';
 import { env } from '../config/env.js';
 import { whatsAppWebhookHandler } from '../modules/whatsapp/index.js';
+import { baileysSessionService } from '../modules/whatsapp/baileys-session.service.js';
 
 export async function webhooksRoutes(app: FastifyInstance) {
+  let activeClinicConfig = {
+    clinicName: 'Clínica Sorriso Perfeito',
+    aiAssistantName: 'Sofia',
+    address: 'Av. Paulista, 1000 - Sala 402, São Paulo',
+    acceptedInsurances: ['Particular', 'Amil Dental', 'Bradesco Dental', 'SulAmérica'],
+    aiCustomRules:
+      'Estacionamento conveniado gratuito no prédio. Avaliações iniciais sem custo para implantes e estética.',
+    dentists: [] as { name: string; specialty: string; cro: string }[],
+  };
+
   /**
-   * Endpoint de IA em Tempo Real (Conecta o Painel Web direto ao Llama 3.3 70B da Groq!)
-   * Recarrega o .env em tempo real e detecta chaves gsk_ mesmo se coladas em OPENAI_API_KEY.
+   * Função compartilhada de geração da IA (usada tanto pelo Chat do Painel quanto pelo WhatsApp Real)
    */
-  app.post('/api/ai/live-chat', async (request, reply) => {
+  async function generateDentalAiReply(data: {
+    clinicName: string;
+    aiAssistantName: string;
+    address: string;
+    acceptedInsurances: string[];
+    aiCustomRules: string;
+    dentists?: { name: string; specialty: string; cro: string }[];
+    patientName: string;
+    patientPhone: string;
+    messageHistory: { sender: 'PATIENT' | 'AI' | 'HUMAN_STAFF'; content: string }[];
+    newMessage: string;
+  }) {
     dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
     dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
-
-    const schema = z.object({
-      clinicName: z.string(),
-      aiAssistantName: z.string(),
-      address: z.string(),
-      acceptedInsurances: z.array(z.string()),
-      aiCustomRules: z.string(),
-      patientName: z.string(),
-      patientPhone: z.string(),
-      messageHistory: z.array(
-        z.object({
-          sender: z.enum(['PATIENT', 'AI', 'HUMAN_STAFF']),
-          content: z.string(),
-        })
-      ),
-      newMessage: z.string(),
-    });
-
-    const data = schema.parse(request.body);
 
     const rawGroq = process.env.GROQ_API_KEY || env.GROQ_API_KEY || '';
     const rawOpenAi = process.env.OPENAI_API_KEY || env.OPENAI_API_KEY || '';
 
-    // Detecta a chave da Groq (gsk_...) mesmo se o usuário tiver colado em OPENAI_API_KEY
     const groqKey = rawGroq.startsWith('gsk_')
       ? rawGroq
       : rawOpenAi.startsWith('gsk_')
@@ -56,9 +57,7 @@ export async function webhooksRoutes(app: FastifyInstance) {
     const hasOpenAiKey = Boolean(openAiKey && openAiKey !== 'sk-...');
 
     if (!hasGroqKey && !hasOpenAiKey) {
-      return reply.status(400).send({
-        error: 'Chave GROQ_API_KEY ou OPENAI_API_KEY não encontrada no arquivo .env',
-      });
+      throw new Error('Chave GROQ_API_KEY ou OPENAI_API_KEY não encontrada no arquivo .env');
     }
 
     const aiProvider = hasGroqKey
@@ -85,6 +84,13 @@ export async function webhooksRoutes(app: FastifyInstance) {
     let handoffAction: { reason: string; urgency: 'HIGH' | 'NORMAL' } | null = null;
     const firstName = data.patientName.split(' ')[0];
 
+    const dentistsList =
+      data.dentists && data.dentists.length > 0
+        ? data.dentists
+            .map((d) => `${d.name} (${d.specialty} - Horários: 09:00, 10:30, 14:00, 16:00)`)
+            .join(' | ')
+        : 'Plantonista da Clínica (Horários: 09:00, 10:30, 14:00, 16:00)';
+
     const systemPrompt = `Você é ${data.aiAssistantName}, recepcionista da clínica odontológica "${data.clinicName}" conversando pelo WhatsApp.
 Data/Hora Atual: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.
 
@@ -92,7 +98,7 @@ Dados de consulta interna (NÃO despeje tudo isso de uma vez! Use apenas quando 
 - Endereço: ${data.address}
 - Convênios: ${data.acceptedInsurances.join(', ')}
 - Observações: ${data.aiCustomRules}
-- Dentistas e vagas: Dr. Carlos Eduardo (Implantes/Geral: 09:00, 10:30, 14:00, 16:30) e Dra. Juliana Mendes (Estética/Orto: 09:30, 11:00, 15:00, 17:00)
+- Dentistas cadastrados na clínica e vagas: ${dentistsList}
 - Valores base: Avaliação (R$ 150), Limpeza (R$ 250), Urgência (R$ 200)
 - Paciente: ${data.patientName} (Tel: ${data.patientPhone})
 
@@ -183,7 +189,6 @@ COMO CONVERSAR DE FORMA 100% HUMANA NO WHATSAPP (MUITO IMPORTANTE):
       temperature: 0.2,
     });
 
-    // Higieniza caracteres Unicode especiais do modelo gpt-oss e garante resposta impecável pós-Tool
     const cleanText = (result.text || '')
       .replace(/[\u202f\u00a0]/g, ' ')
       .replace(/[\u2011]/g, '-')
@@ -192,7 +197,6 @@ COMO CONVERSAR DE FORMA 100% HUMANA NO WHATSAPP (MUITO IMPORTANTE):
 
     let finalReply = cleanText;
 
-    // Respostas determinísticas limpas e divididas em balões curtos pós-Tool
     if (handoffAction) {
       finalReply = `Oi, ${firstName}! Sinto muito que você esteja passando por essa dor.|||Já avisei nossa recepção com prioridade máxima e a nossa atendente vai te chamar aqui agora mesmo para te encaixar, tá bom?`;
     } else if (cancelledAction) {
@@ -210,7 +214,6 @@ COMO CONVERSAR DE FORMA 100% HUMANA NO WHATSAPP (MUITO IMPORTANTE):
       }
     }
 
-    // Divide em balões curtos de WhatsApp (por "|||" ou quebra dupla de linha)
     const bubbles = (finalReply || `Perfeito, ${firstName}! Como posso te ajudar?`)
       .split(/\|\|\||\n\n+/)
       .map((b) => b.replace(/\*/g, '').trim())
@@ -224,6 +227,108 @@ COMO CONVERSAR DE FORMA 100% HUMANA NO WHATSAPP (MUITO IMPORTANTE):
       cancelledAction,
       handoffAction,
     };
+  }
+
+  // Registra o gerador de IA no conector de WhatsApp Real (Baileys) e Simulador
+  baileysSessionService.registerAiGenerator(async (input) => {
+    return generateDentalAiReply({
+      ...activeClinicConfig,
+      ...input,
+    });
+  });
+
+  app.post('/api/whatsapp-real/clinic-config', async (request) => {
+    const body = request.body as Partial<typeof activeClinicConfig>;
+    activeClinicConfig = {
+      ...activeClinicConfig,
+      ...body,
+    };
+    return { updated: true, config: activeClinicConfig };
+  });
+
+  /**
+   * Rotas do Conector de WhatsApp Real (QR Code Nativo + Mensagens Ao Vivo)
+   */
+  app.post('/api/whatsapp-real/connect', async () => {
+    return baileysSessionService.startSession();
+  });
+
+  app.get('/api/whatsapp-real/status', async () => {
+    return baileysSessionService.getState();
+  });
+
+  app.post('/api/whatsapp-real/disconnect', async () => {
+    return baileysSessionService.disconnectSession();
+  });
+
+  app.post('/api/whatsapp-real/send-staff', async (request) => {
+    const schema = z.object({
+      remoteJid: z.string(),
+      text: z.string().min(1),
+    });
+    const { remoteJid, text } = schema.parse(request.body);
+    await baileysSessionService.sendManualStaffMessage(remoteJid, text);
+    return { sent: true };
+  });
+
+  /**
+   * Rotas do Painel de Teste / Simulador Standalone (Sem WhatsApp)
+   */
+  app.post('/api/whatsapp-real/simulate', async (request, reply) => {
+    const schema = z.object({
+      phone: z.string().default('11 99999-8888'),
+      patientName: z.string().default('Lucas Martins'),
+      insuranceName: z.string().optional(),
+      text: z.string().min(1),
+    });
+    try {
+      const body = schema.parse(request.body);
+      return await baileysSessionService.simulateIncomingMessage(body);
+    } catch (err) {
+      return reply.status(400).send({ error: (err as Error).message });
+    }
+  });
+
+  app.post('/api/whatsapp-real/reset-simulator', async (request) => {
+    const body = (request.body as { phone?: string }) || {};
+    return baileysSessionService.resetSimulation(body.phone);
+  });
+
+  app.post('/api/whatsapp-real/reactivate-ai', async (request) => {
+    const schema = z.object({
+      remoteJid: z.string(),
+    });
+    const { remoteJid } = schema.parse(request.body);
+    return { conversation: baileysSessionService.reactivateAiForConversation(remoteJid) };
+  });
+
+  /**
+   * Endpoint de IA em Tempo Real (Conecta o Painel Web direto ao Groq!)
+   */
+  app.post('/api/ai/live-chat', async (request, reply) => {
+    const schema = z.object({
+      clinicName: z.string(),
+      aiAssistantName: z.string(),
+      address: z.string(),
+      acceptedInsurances: z.array(z.string()),
+      aiCustomRules: z.string(),
+      patientName: z.string(),
+      patientPhone: z.string(),
+      messageHistory: z.array(
+        z.object({
+          sender: z.enum(['PATIENT', 'AI', 'HUMAN_STAFF']),
+          content: z.string(),
+        })
+      ),
+      newMessage: z.string(),
+    });
+
+    try {
+      const data = schema.parse(request.body);
+      return await generateDentalAiReply(data);
+    } catch (err) {
+      return reply.status(400).send({ error: (err as Error).message });
+    }
   });
   /**
    * Endpoint oficial para receber eventos da Evolution API (WhatsApp Real)

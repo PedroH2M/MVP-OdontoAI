@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import {
   Calendar,
   MessageSquare,
@@ -55,22 +56,7 @@ const DEMO_CLINIC: Clinic = {
   aiCustomRules:
     'Estacionamento conveniado gratuito no prédio. Avaliações iniciais sem custo para implantes e estética.',
   isBotActive: true,
-  dentists: [
-    {
-      id: 'dent-1',
-      name: 'Dr. Carlos Eduardo',
-      cro: 'SP-102938',
-      specialty: 'Implantodontia',
-      color: '#0284c7',
-    },
-    {
-      id: 'dent-2',
-      name: 'Dra. Juliana Mendes',
-      cro: 'SP-495821',
-      specialty: 'Estética & Ortodontia',
-      color: '#0d9488',
-    },
-  ],
+  dentists: [],
   procedures: [
     { id: 'proc-1', name: 'Avaliação Inicial', durationMinutes: 30, price: 150 },
     { id: 'proc-2', name: 'Limpeza (Profilaxia)', durationMinutes: 45, price: 250 },
@@ -106,8 +92,10 @@ export default function OdontoAiCompleteWorkspace() {
   const [loginEmail, setLoginEmail] = useState<string>('recepcao@sorrisoperfeito.com.br');
   const [loginPassword, setLoginPassword] = useState<string>('123456');
 
-  // Controle de Conexão WhatsApp QR Code (Bloco 8)
-  const [isWhatsAppConnected, setIsWhatsAppConnected] = useState<boolean>(true);
+  // Controle de Conexão WhatsApp QR Code Real (Bloco 8 + Baileys)
+  const [isWhatsAppConnected, setIsWhatsAppConnected] = useState<boolean>(false);
+  const [connectedWhatsAppPhone, setConnectedWhatsAppPhone] = useState<string | null>(null);
+  const [realQrCodeUrl, setRealQrCodeUrl] = useState<string | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(false);
   const [qrStep, setQrStep] = useState<'QRCODE' | 'CONNECTING' | 'CONNECTED'>('QRCODE');
 
@@ -115,133 +103,13 @@ export default function OdontoAiCompleteWorkspace() {
   const [clinic, setClinic] = useState<Clinic>(DEMO_CLINIC);
   const [selectedDentistFilter, setSelectedDentistFilter] = useState<string>('ALL');
 
-  const [appointments, setAppointments] = useState<AppointmentItem[]>([
-    {
-      id: 'appt-1',
-      startTime: new Date(new Date().setHours(9, 0, 0, 0)).toISOString(),
-      endTime: new Date(new Date().setHours(9, 45, 0, 0)).toISOString(),
-      status: 'CONFIRMED',
-      bookedByAi: true,
-      reminderSent: true,
-      patient: { id: 'p-1', name: 'Mariana Costa', phone: '11 98888-1111', insuranceName: 'Bradesco Dental' },
-      dentist: DEMO_CLINIC.dentists[1],
-      procedure: DEMO_CLINIC.procedures[1],
-    },
-    {
-      id: 'appt-2',
-      startTime: new Date(new Date().setHours(11, 0, 0, 0)).toISOString(),
-      endTime: new Date(new Date().setHours(11, 30, 0, 0)).toISOString(),
-      status: 'CONFIRMED',
-      bookedByAi: true,
-      reminderSent: true,
-      patient: { id: 'p-3', name: 'Fernanda Oliveira', phone: '11 96666-3333', insuranceName: 'Particular' },
-      dentist: DEMO_CLINIC.dentists[0],
-      procedure: DEMO_CLINIC.procedures[0],
-    },
-    {
-      id: 'appt-3',
-      startTime: new Date(new Date().setHours(14, 30, 0, 0)).toISOString(),
-      endTime: new Date(new Date().setHours(15, 0, 0, 0)).toISOString(),
-      status: 'SCHEDULED',
-      bookedByAi: false,
-      reminderSent: false,
-      patient: { id: 'p-4', name: 'Rafael Souza', phone: '11 94444-5555', insuranceName: 'Amil Dental' },
-      dentist: DEMO_CLINIC.dentists[0],
-      procedure: DEMO_CLINIC.procedures[0],
-    },
-    {
-      id: 'appt-4',
-      startTime: new Date(new Date().setHours(16, 0, 0, 0)).toISOString(),
-      endTime: new Date(new Date().setHours(16, 45, 0, 0)).toISOString(),
-      status: 'SCHEDULED',
-      bookedByAi: true,
-      reminderSent: false,
-      patient: { id: 'p-5', name: 'Beatriz Santos', phone: '11 93333-2222', insuranceName: 'SulAmérica' },
-      dentist: DEMO_CLINIC.dentists[1],
-      procedure: DEMO_CLINIC.procedures[1],
-    },
-  ]);
+  // Estado inicial limpo (sem agendamentos nem conversas fictícias pré-cadastradas)
+  const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
 
-  const [conversations, setConversations] = useState<ConversationItem[]>([
-    {
-      id: 'conv-urgent',
-      status: 'WAITING_HUMAN',
-      urgency: 'HIGH',
-      handoffReason: 'Relatou dor pós-extração e pediu encaixe com Dr. Carlos.',
-      lastMessageAt: new Date().toISOString(),
-      patient: { id: 'p-2', name: 'Roberto Almeida', phone: '11 97777-2222', insuranceName: 'Particular' },
-      messages: [
-        {
-          id: 'm-1',
-          sender: 'PATIENT',
-          content: 'Oi, fiz uma extração ontem e está doendo bastante, consigo falar com o Dr. Carlos?',
-          mediaType: 'text',
-          createdAt: new Date(Date.now() - 180000).toISOString(),
-        },
-        {
-          id: 'm-2',
-          sender: 'AI',
-          content:
-            'Sinto muito que esteja com dor, Roberto. Já avisei a recepção com prioridade máxima e nossa atendente vai te responder aqui em instantes.',
-          mediaType: 'text',
-          createdAt: new Date(Date.now() - 170000).toISOString(),
-        },
-      ],
-    },
-    {
-      id: 'conv-normal',
-      status: 'AI_HANDLING',
-      urgency: 'NORMAL',
-      handoffReason: null,
-      lastMessageAt: new Date(Date.now() - 600000).toISOString(),
-      patient: { id: 'p-1', name: 'Mariana Costa', phone: '11 98888-1111', insuranceName: 'Bradesco Dental' },
-      messages: [
-        {
-          id: 'm-3',
-          sender: 'PATIENT',
-          content: 'Bom dia! Vocês atendem Bradesco Dental para limpeza?',
-          mediaType: 'text',
-          createdAt: new Date(Date.now() - 650000).toISOString(),
-        },
-        {
-          id: 'm-4',
-          sender: 'AI',
-          content:
-            'Bom dia, Mariana! 😊 Atendemos sim. Agendei sua Limpeza com a Dra. Juliana para hoje às 09:00.',
-          mediaType: 'text',
-          createdAt: new Date(Date.now() - 600000).toISOString(),
-        },
-      ],
-    },
-    {
-      id: 'conv-3',
-      status: 'AI_HANDLING',
-      urgency: 'NORMAL',
-      handoffReason: null,
-      lastMessageAt: new Date(Date.now() - 1800000).toISOString(),
-      patient: { id: 'p-5', name: 'Beatriz Santos', phone: '11 93333-2222', insuranceName: 'SulAmérica' },
-      messages: [
-        {
-          id: 'm-5',
-          sender: 'PATIENT',
-          content: 'Queria marcar uma profilaxia para hoje à tarde.',
-          mediaType: 'text',
-          createdAt: new Date(Date.now() - 1900000).toISOString(),
-        },
-        {
-          id: 'm-6',
-          sender: 'AI',
-          content: 'Perfeito, Beatriz! Reservei seu horário hoje às 16:00 com a Dra. Juliana Mendes.',
-          mediaType: 'text',
-          createdAt: new Date(Date.now() - 1800000).toISOString(),
-        },
-      ],
-    },
-  ]);
-
-  const [selectedConversationId, setSelectedConversationId] = useState<string>('conv-normal');
+  const [selectedConversationId, setSelectedConversationId] = useState<string>('');
   const [staffReplyText, setStaffReplyText] = useState<string>('');
-  const [chatSenderMode, setChatSenderMode] = useState<'PATIENT' | 'HUMAN_STAFF'>('PATIENT');
+  const [chatSenderMode, setChatSenderMode] = useState<'PATIENT' | 'HUMAN_STAFF'>('HUMAN_STAFF');
   const [isAiTypingInChat, setIsAiTypingInChat] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -253,12 +121,21 @@ export default function OdontoAiCompleteWorkspace() {
     'Olá! Quais horários têm livres amanhã?'
   );
 
+  // Modal de Cadastro de Novo Profissional (Dentista)
+  const [isDentistModalOpen, setIsDentistModalOpen] = useState<boolean>(false);
+  const [dentistForm, setDentistForm] = useState({
+    name: '',
+    cro: '',
+    specialty: 'Clínica Geral & Avaliação',
+    color: '#0284c7',
+  });
+
   const [isBookingModalOpen, setIsBookingModalOpen] = useState<boolean>(false);
   const [bookingForm, setBookingForm] = useState({
     patientName: '',
     patientPhone: '',
     insuranceName: 'Particular',
-    dentistId: DEMO_CLINIC.dentists[0].id,
+    dentistId: '',
     procedureId: DEMO_CLINIC.procedures[0].id,
     startTime: '10:30',
   });
@@ -270,30 +147,104 @@ export default function OdontoAiCompleteWorkspace() {
     setTimeout(() => setToastMessage(null), 3200);
   };
 
+  const syncClinicConfigToBackend = useCallback(async (updatedClinic: Clinic) => {
+    try {
+      await fetch(`${API_BASE_URL}/api/whatsapp-real/clinic-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clinicName: updatedClinic.name,
+          aiAssistantName: updatedClinic.aiAssistantName,
+          address: updatedClinic.address,
+          acceptedInsurances: updatedClinic.acceptedInsurances,
+          aiCustomRules: updatedClinic.aiCustomRules,
+          dentists: updatedClinic.dentists.map((d) => ({
+            name: d.name,
+            specialty: d.specialty,
+            cro: d.cro,
+          })),
+        }),
+      });
+    } catch {
+      // Ignora erro caso offline
+    }
+  }, []);
+
   const syncWithBackend = useCallback(async () => {
     try {
       const savedBranding = localStorage.getItem('odonto_ai_whitelabel');
       if (savedBranding) {
         const parsed = JSON.parse(savedBranding);
-        setClinic((prev) => ({ ...prev, ...parsed }));
+        setClinic((prev) => {
+          const merged = {
+            ...prev,
+            ...parsed,
+            dentists: Array.isArray(parsed.dentists) ? parsed.dentists : prev.dentists,
+          };
+          syncClinicConfigToBackend(merged);
+          return merged;
+        });
       }
-
-      const res = await fetch(`${API_BASE_URL}/api/clinics/current`);
-      if (!res.ok) return;
-      const liveClinic: Clinic = await res.json();
-      setClinic((prev) => ({
-        ...liveClinic,
-        brandColor: liveClinic.brandColor || prev.brandColor || '#0284c7',
-        logoUrl: liveClinic.logoUrl ?? prev.logoUrl,
-      }));
     } catch {
       // Estado local
     }
-  }, []);
+  }, [syncClinicConfigToBackend]);
 
   useEffect(() => {
     syncWithBackend();
   }, [syncWithBackend]);
+
+  const handleCreateDentist = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dentistForm.name.trim()) return;
+
+    const newDentist = {
+      id: `dent-${Date.now()}`,
+      name: dentistForm.name.trim(),
+      cro: dentistForm.cro.trim() || 'CRO Ativo',
+      specialty: dentistForm.specialty.trim() || 'Clínica Geral',
+      color: dentistForm.color || brandColor,
+    };
+
+    setClinic((prev) => {
+      const updated = {
+        ...prev,
+        dentists: [...prev.dentists, newDentist],
+      };
+      localStorage.setItem('odonto_ai_whitelabel', JSON.stringify(updated));
+      syncClinicConfigToBackend(updated);
+      return updated;
+    });
+
+    setBookingForm((prev) => ({
+      ...prev,
+      dentistId: prev.dentistId || newDentist.id,
+    }));
+    setDentistForm({
+      name: '',
+      cro: '',
+      specialty: 'Clínica Geral & Avaliação',
+      color: '#0284c7',
+    });
+    setIsDentistModalOpen(false);
+    showToast(`👨‍⚕️ Profissional ${newDentist.name} cadastrado com sucesso!`);
+  };
+
+  const handleDeleteDentist = (dentistId: string) => {
+    setClinic((prev) => {
+      const updated = {
+        ...prev,
+        dentists: prev.dentists.filter((d) => d.id !== dentistId),
+      };
+      localStorage.setItem('odonto_ai_whitelabel', JSON.stringify(updated));
+      syncClinicConfigToBackend(updated);
+      return updated;
+    });
+    if (selectedDentistFilter === dentistId) {
+      setSelectedDentistFilter('ALL');
+    }
+    showToast('Profissional removido da clínica.');
+  };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -301,18 +252,107 @@ export default function OdontoAiCompleteWorkspace() {
     showToast(`Bem-vindo(a) ao painel da ${clinic.name}!`);
   };
 
-  const handleOpenQrScanner = () => {
-    setQrStep(isWhatsAppConnected ? 'CONNECTED' : 'QRCODE');
+  const handleOpenQrScanner = async () => {
     setIsQrModalOpen(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp-real/connect`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'CONNECTED') {
+          setQrStep('CONNECTED');
+          setIsWhatsAppConnected(true);
+          setConnectedWhatsAppPhone(data.connectedPhone);
+        } else {
+          setQrStep('QRCODE');
+          if (data.qrCodeDataUrl) setRealQrCodeUrl(data.qrCodeDataUrl);
+        }
+      }
+    } catch {
+      // Fallback
+    }
   };
 
-  const handleSimulateQrScan = () => {
-    setQrStep('CONNECTING');
-    setTimeout(() => {
-      setQrStep('CONNECTED');
-      setIsWhatsAppConnected(true);
-      showToast('📲 WhatsApp da clínica conectado com sucesso!');
-    }, 1200);
+  // Faz polling do QR Code Real e das mensagens vindas do celular conectado / simulador
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/whatsapp-real/status`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.qrCodeDataUrl) {
+          setRealQrCodeUrl(data.qrCodeDataUrl);
+          setQrStep('QRCODE');
+        }
+
+        if (data.status === 'CONNECTED') {
+          if (!isWhatsAppConnected) {
+            showToast(`📲 WhatsApp Real conectado (${data.connectedPhone})!`);
+          }
+          setIsWhatsAppConnected(true);
+          setConnectedWhatsAppPhone(data.connectedPhone);
+          setQrStep('CONNECTED');
+          setRealQrCodeUrl(null);
+        } else if (data.status === 'DISCONNECTED') {
+          setIsWhatsAppConnected(false);
+        }
+
+        // Sincroniza conversas reais do celular ou do simulador dev para a tela do Painel
+        if (Array.isArray(data.conversations)) {
+          setConversations((prev) => {
+            const manualOnly = prev.filter((c) => !c.id.startsWith('wa-'));
+            return [...data.conversations, ...manualOnly];
+          });
+        }
+
+        // Sincroniza agendamentos reais feitos pelo celular ou simulador dev para a Agenda do Dia
+        if (Array.isArray(data.appointments)) {
+          setAppointments((prev) => {
+            const manualOnly = prev.filter((a) => !a.id.startsWith('wa-appt-'));
+            const mappedReal: AppointmentItem[] = data.appointments.map((ra: any) => ({
+              id: ra.id,
+              startTime: ra.startTime,
+              endTime: ra.endTime,
+              status: ra.status,
+              bookedByAi: true,
+              reminderSent: false,
+              patient: ra.patient,
+              dentist:
+                clinic.dentists.find((d) =>
+                  d.name.toLowerCase().includes((ra.dentistName || '').toLowerCase())
+                ) ||
+                clinic.dentists[0] || {
+                  id: 'dent-default',
+                  name: ra.dentistName || 'Profissional da Clínica',
+                  cro: 'CRO Ativo',
+                  specialty: 'Atendimento Geral',
+                  color: brandColor,
+                },
+              procedure:
+                clinic.procedures.find((p) =>
+                  p.name.toLowerCase().includes((ra.procedureName || '').toLowerCase())
+                ) || clinic.procedures[0],
+            }));
+            return [...mappedReal, ...manualOnly];
+          });
+        }
+      } catch {
+        // Ignora se offline
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isWhatsAppConnected, clinic.dentists, clinic.procedures, brandColor]);
+
+  const handleDisconnectRealWhatsApp = async () => {
+    await fetch(`${API_BASE_URL}/api/whatsapp-real/disconnect`, { method: 'POST' });
+    setIsWhatsAppConnected(false);
+    setConnectedWhatsAppPhone(null);
+    setRealQrCodeUrl(null);
+    setQrStep('QRCODE');
+    await handleOpenQrScanner();
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -351,8 +391,11 @@ export default function OdontoAiCompleteWorkspace() {
         address: clinic.address,
         acceptedInsurances: clinic.acceptedInsurances,
         aiCustomRules: clinic.aiCustomRules,
+        dentists: clinic.dentists,
       })
     );
+
+    syncClinicConfigToBackend(clinic);
 
     try {
       await fetch(`${API_BASE_URL}/api/clinics/${clinic.id}/settings`, {
@@ -428,13 +471,23 @@ export default function OdontoAiCompleteWorkspace() {
     );
   };
 
-  const handleToggleConversationMode = (conv: ConversationItem) => {
+  const handleToggleConversationMode = async (conv: ConversationItem) => {
     const nextStatus = conv.status === 'AI_HANDLING' ? 'HUMAN_HANDLING' : 'AI_HANDLING';
     setConversations((prev) =>
       prev.map((c) =>
         c.id === conv.id ? { ...c, status: nextStatus, handoffReason: null } : c
       )
     );
+
+    const anyConv = conv as any;
+    if (nextStatus === 'AI_HANDLING' && anyConv.remoteJid) {
+      fetch(`${API_BASE_URL}/api/whatsapp-real/reactivate-ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remoteJid: anyConv.remoteJid }),
+      }).catch(() => {});
+    }
+
     showToast(
       nextStatus === 'HUMAN_HANDLING'
         ? 'Você assumiu o atendimento desta conversa'
@@ -444,210 +497,45 @@ export default function OdontoAiCompleteWorkspace() {
 
   const handleSendStaffMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!staffReplyText.trim() || !selectedConversation || isAiTypingInChat) return;
+    if (!staffReplyText.trim() || !selectedConversation) return;
 
     const text = staffReplyText.trim();
     setStaffReplyText('');
 
-    // MODO 1: Enviando como Recepcionista Humana
-    if (chatSenderMode === 'HUMAN_STAFF') {
-      const newMsg = {
-        id: `msg-${Date.now()}`,
-        sender: 'HUMAN_STAFF' as const,
-        content: text,
-        mediaType: 'text',
-        createdAt: new Date().toISOString(),
-      };
-
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === selectedConversation.id
-            ? {
-                ...c,
-                status: 'HUMAN_HANDLING',
-                messages: [...c.messages, newMsg],
-              }
-            : c
-        )
-      );
-      return;
-    }
-
-    // MODO 2: Simulando Mensagem do Paciente (Cliente) direto no Chat!
-    const patientMsg = {
-      id: `msg-pat-${Date.now()}`,
-      sender: 'PATIENT' as const,
+    const newMsg = {
+      id: `msg-${Date.now()}`,
+      sender: 'HUMAN_STAFF' as const,
       content: text,
       mediaType: 'text',
       createdAt: new Date().toISOString(),
     };
 
-    const currentHistory = selectedConversation.messages.map((m) => ({
-      sender: m.sender,
-      content: m.content,
-    }));
-
-    // Adiciona a mensagem do paciente imediatamente na tela
     setConversations((prev) =>
       prev.map((c) =>
         c.id === selectedConversation.id
           ? {
               ...c,
+              status: 'HUMAN_HANDLING',
               lastMessageAt: new Date().toISOString(),
-              messages: [...c.messages, patientMsg],
+              messages: [...c.messages, newMsg],
             }
           : c
       )
     );
 
-    // Se a IA estiver pausada nessa conversa (ex: modo Manual ou Aguardando Humano), apenas registra a msg do cliente
-    if (!clinic.isBotActive || selectedConversation.status !== 'AI_HANDLING') {
-      showToast('Mensagem do paciente recebida (IA pausada nesta conversa — clique em Reativar IA para ela responder)');
-      return;
-    }
-
-    // Chama a IA Real (Groq) para responder ao cliente na conversa aberta!
-    setIsAiTypingInChat(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/ai/live-chat`, {
+    const anyConv = selectedConversation as any;
+    if (anyConv.remoteJid) {
+      fetch(`${API_BASE_URL}/api/whatsapp-real/send-staff`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          clinicName: clinic.name,
-          aiAssistantName: clinic.aiAssistantName,
-          address: clinic.address,
-          acceptedInsurances: clinic.acceptedInsurances,
-          aiCustomRules: clinic.aiCustomRules,
-          patientName: selectedConversation.patient.name,
-          patientPhone: selectedConversation.patient.phone,
-          messageHistory: currentHistory,
-          newMessage: text,
+          remoteJid: anyConv.remoteJid,
+          text,
         }),
-      });
-
-      if (response.ok) {
-        const aiData = await response.json();
-        const bubbles: string[] =
-          Array.isArray(aiData.bubbles) && aiData.bubbles.length > 0
-            ? aiData.bubbles
-            : [aiData.reply];
-
-        let nextStatus: ConversationItem['status'] = 'AI_HANDLING';
-        let handoffReason: string | null = null;
-
-        // Detecta se o paciente digitou um número de telefone na mensagem para atualizar o contato salvo
-        const phoneInTextMatch = text.match(/(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?\d{4,5}[-\s]?\d{4}/);
-        const updatedPhone =
-          aiData.bookedAction?.contactPhone ||
-          aiData.cancelledAction?.contactPhone ||
-          (phoneInTextMatch ? phoneInTextMatch[0].trim() : selectedConversation.patient.phone);
-
-        if (phoneInTextMatch) {
-          setAppointments((prev) =>
-            prev.map((a) =>
-              a.patient.name.toLowerCase() === selectedConversation.patient.name.toLowerCase()
-                ? { ...a, patient: { ...a.patient, phone: updatedPhone } }
-                : a
-            )
-          );
-        }
-
-        if (aiData.handoffAction) {
-          nextStatus = 'WAITING_HUMAN';
-          handoffReason = aiData.handoffAction.reason;
-        }
-
-        // Se o paciente pediu para CANCELAR, muda o status para CANCELLED (sai do Painel Inicial)
-        if (aiData.cancelledAction) {
-          setAppointments((prev) =>
-            prev.map((a) =>
-              a.patient.name.toLowerCase() === selectedConversation.patient.name.toLowerCase() &&
-              a.status !== 'CANCELLED'
-                ? {
-                    ...a,
-                    status: 'CANCELLED',
-                    notes: `Cancelado via IA: ${aiData.cancelledAction.reason}`,
-                    patient: { ...a.patient, phone: updatedPhone },
-                  }
-                : a
-            )
-          );
-          showToast('❌ Consulta cancelada pela IA e removida da agenda ativa do dia!');
-        }
-
-        if (aiData.bookedAction) {
-          const [hh, mm] = (aiData.bookedAction.time || '11:00').split(':').map(Number);
-          const start = new Date();
-          start.setHours(isNaN(hh) ? 11 : hh, isNaN(mm) ? 0 : mm, 0, 0);
-          const end = new Date(start.getTime() + 30 * 60000);
-
-          const chosenDentist =
-            clinic.dentists.find((d) =>
-              d.name.toLowerCase().includes((aiData.bookedAction.dentistName || '').toLowerCase())
-            ) || clinic.dentists[0];
-
-          const chosenProcedure =
-            clinic.procedures.find((p) =>
-              p.name.toLowerCase().includes((aiData.bookedAction.procedureName || '').toLowerCase())
-            ) || clinic.procedures[0];
-
-          setAppointments((prev) => [
-            ...prev,
-            {
-              id: `appt-${Date.now()}`,
-              startTime: start.toISOString(),
-              endTime: end.toISOString(),
-              status: 'CONFIRMED',
-              bookedByAi: true,
-              reminderSent: false,
-              patient: {
-                ...selectedConversation.patient,
-                phone: updatedPhone,
-              },
-              dentist: chosenDentist,
-              procedure: chosenProcedure,
-            },
-          ]);
-          showToast(`📅 Consulta agendada pela IA às ${aiData.bookedAction.time} (Contato: ${updatedPhone})!`);
-        }
-
-        // Envia cada balão da IA um por um com pausa natural de digitação humana (700ms entre balões)
-        for (let i = 0; i < bubbles.length; i++) {
-          if (i > 0) {
-            setIsAiTypingInChat(true);
-            await new Promise((r) => setTimeout(r, 750));
-          }
-
-          const bubbleMsg = {
-            id: `msg-ai-${Date.now()}-${i}`,
-            sender: 'AI' as const,
-            content: bubbles[i],
-            mediaType: 'text',
-            createdAt: new Date().toISOString(),
-          };
-
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.id === selectedConversation.id
-                ? {
-                    ...c,
-                    patient: { ...c.patient, phone: updatedPhone },
-                    status: i === bubbles.length - 1 ? nextStatus : c.status,
-                    urgency: nextStatus === 'WAITING_HUMAN' ? 'HIGH' : c.urgency,
-                    handoffReason: handoffReason || c.handoffReason,
-                    lastMessageAt: new Date().toISOString(),
-                    messages: [...c.messages, bubbleMsg],
-                  }
-                : c
-            )
-          );
-        }
-      }
-    } catch {
-      showToast('Erro ao contatar o servidor da IA na porta 3333.');
-    } finally {
-      setIsAiTypingInChat(false);
+      }).catch(() => {});
     }
+
+    showToast('Mensagem enviada pela recepção (IA pausada nesta conversa)');
   };
 
   const handleToggleAppointmentConfirm = (
@@ -908,7 +796,14 @@ export default function OdontoAiCompleteWorkspace() {
   const handleCreateManualAppointment = (e: React.FormEvent) => {
     e.preventDefault();
     const dentist =
-      clinic.dentists.find((d) => d.id === bookingForm.dentistId) || clinic.dentists[0];
+      clinic.dentists.find((d) => d.id === bookingForm.dentistId) ||
+      clinic.dentists[0] || {
+        id: 'dent-default',
+        name: 'Plantonista da Clínica',
+        cro: 'CRO Ativo',
+        specialty: 'Atendimento Geral',
+        color: brandColor,
+      };
     const procedure =
       clinic.procedures.find((p) => p.id === bookingForm.procedureId) || clinic.procedures[0];
     const [hh, mm] = bookingForm.startTime.split(':').map(Number);
@@ -1177,23 +1072,13 @@ export default function OdontoAiCompleteWorkspace() {
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setIsSimulatorOpen(true)}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-medium text-slate-700 transition"
-            >
-              <FlaskConical className="w-3.5 h-3.5" style={{ color: brandColor }} />
-              Simular Chat
-            </button>
-
-            <button
-              onClick={() => setIsAuthenticated(false)}
-              title="Ver Tela de Login"
-              className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-800 transition"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            onClick={() => setIsAuthenticated(false)}
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Sair da Conta
+          </button>
         </div>
       </aside>
 
@@ -1324,104 +1209,120 @@ export default function OdontoAiCompleteWorkspace() {
                 </div>
 
                 <div className="divide-y divide-slate-100">
-                  {filteredAppointments
-                    .sort(
-                      (a, b) =>
-                        new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-                    )
-                    .map((appt) => {
-                      const timeStart = new Date(appt.startTime).toLocaleTimeString('pt-BR', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      });
-                      const isConfirmed = appt.status === 'CONFIRMED';
-                      const isCompleted = appt.status === 'COMPLETED';
+                  {filteredAppointments.length === 0 ? (
+                    <div className="p-10 text-center space-y-3">
+                      <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                        <Calendar className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-700">
+                          Nenhum agendamento registrado hoje
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Novas consultas marcadas pela IA no WhatsApp ou manualmente aparecerão aqui.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    filteredAppointments
+                      .sort(
+                        (a, b) =>
+                          new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+                      )
+                      .map((appt) => {
+                        const timeStart = new Date(appt.startTime).toLocaleTimeString('pt-BR', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        });
+                        const isConfirmed = appt.status === 'CONFIRMED';
+                        const isCompleted = appt.status === 'COMPLETED';
 
-                      return (
-                        <div
-                          key={appt.id}
-                          className="px-6 py-4 flex items-center justify-between gap-4 hover:bg-slate-50/70 transition"
-                        >
-                          <div className="flex items-center gap-4">
-                            <div
-                              className="w-16 pl-3 border-l-[3px]"
-                              style={{ borderColor: appt.dentist.color }}
-                            >
-                              <div className="text-sm font-bold text-slate-900">
-                                {timeStart}
+                        return (
+                          <div
+                            key={appt.id}
+                            className="px-6 py-4 flex items-center justify-between gap-4 hover:bg-slate-50/70 transition"
+                          >
+                            <div className="flex items-center gap-4">
+                              <div
+                                className="w-16 pl-3 border-l-[3px]"
+                                style={{ borderColor: appt.dentist.color }}
+                              >
+                                <div className="text-sm font-bold text-slate-900">
+                                  {timeStart}
+                                </div>
+                                <div className="text-[11px] text-slate-400">
+                                  {appt.procedure.durationMinutes} min
+                                </div>
                               </div>
-                              <div className="text-[11px] text-slate-400">
-                                {appt.procedure.durationMinutes} min
+
+                              <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-600 font-semibold text-xs flex items-center justify-center shrink-0">
+                                {getInitials(appt.patient.name)}
                               </div>
-                            </div>
 
-                            <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-600 font-semibold text-xs flex items-center justify-center shrink-0">
-                              {getInitials(appt.patient.name)}
-                            </div>
-
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-semibold text-slate-900">
-                                  {appt.patient.name}
-                                </span>
-                                {appt.bookedByAi && (
-                                  <span
-                                    style={{
-                                      backgroundColor: `${brandColor}15`,
-                                      color: brandColor,
-                                    }}
-                                    className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md"
-                                  >
-                                    <Sparkles className="w-2.5 h-2.5" />
-                                    IA
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold text-slate-900">
+                                    {appt.patient.name}
                                   </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-2">
-                                <span>{appt.procedure.name}</span>
-                                <span>•</span>
-                                <span>{appt.dentist.name}</span>
-                                <span>•</span>
-                                <span className="inline-flex items-center gap-1 font-medium text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
-                                  <Phone className="w-3 h-3 text-slate-500" />
-                                  {appt.patient.phone}
-                                </span>
-                                <span>•</span>
-                                <span className="text-slate-400">
-                                  {appt.patient.insuranceName || 'Particular'}
-                                </span>
+                                  {appt.bookedByAi && (
+                                    <span
+                                      style={{
+                                        backgroundColor: `${brandColor}15`,
+                                        color: brandColor,
+                                      }}
+                                      className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md"
+                                    >
+                                      <Sparkles className="w-2.5 h-2.5" />
+                                      IA
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-2">
+                                  <span>{appt.procedure.name}</span>
+                                  <span>•</span>
+                                  <span>{appt.dentist.name}</span>
+                                  <span>•</span>
+                                  <span className="inline-flex items-center gap-1 font-medium text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                                    <Phone className="w-3 h-3 text-slate-500" />
+                                    {appt.patient.phone}
+                                  </span>
+                                  <span>•</span>
+                                  <span className="text-slate-400">
+                                    {appt.patient.insuranceName || 'Particular'}
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          {appt.status === 'CANCELLED' ? (
-                            <span className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-50 text-rose-700">
-                              Cancelado
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() =>
-                                handleToggleAppointmentConfirm(appt.id, appt.status)
-                              }
-                              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 ${
-                                isCompleted
-                                  ? 'bg-slate-100 text-slate-500'
+                            {appt.status === 'CANCELLED' ? (
+                              <span className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-50 text-rose-700">
+                                Cancelado
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() =>
+                                  handleToggleAppointmentConfirm(appt.id, appt.status)
+                                }
+                                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 ${
+                                  isCompleted
+                                    ? 'bg-slate-100 text-slate-500'
+                                    : isConfirmed
+                                    ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                    : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                }`}
+                              >
+                                {isConfirmed && <Check className="w-3.5 h-3.5" />}
+                                {isCompleted
+                                  ? 'Atendido'
                                   : isConfirmed
-                                  ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                  : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                              }`}
-                            >
-                              {isConfirmed && <Check className="w-3.5 h-3.5" />}
-                              {isCompleted
-                                ? 'Atendido'
-                                : isConfirmed
-                                ? 'Confirmado'
-                                : 'Confirmar'}
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
+                                  ? 'Confirmado'
+                                  : 'Confirmar'}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })
+                  )}
                 </div>
               </div>
 
@@ -1479,47 +1380,53 @@ export default function OdontoAiCompleteWorkspace() {
                     </button>
                   </div>
 
-                  <div className="space-y-3">
-                    {conversations.slice(0, 3).map((conv) => {
-                      const lastMsg = conv.messages[conv.messages.length - 1];
-                      return (
-                        <button
-                          key={conv.id}
-                          onClick={() => {
-                            setSelectedConversationId(conv.id);
-                            setActiveTab('inbox');
-                          }}
-                          className="w-full text-left p-3 rounded-xl hover:bg-slate-50 border border-slate-100 transition space-y-1"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-slate-900">
-                              {conv.patient.name}
-                            </span>
-                            <span
-                              style={
-                                conv.status !== 'WAITING_HUMAN'
-                                  ? {
-                                      backgroundColor: `${brandColor}15`,
-                                      color: brandColor,
-                                    }
-                                  : undefined
-                              }
-                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                conv.status === 'WAITING_HUMAN'
-                                  ? 'bg-rose-50 text-rose-600'
-                                  : ''
-                              }`}
-                            >
-                              {conv.status === 'WAITING_HUMAN' ? 'Aguardando' : 'IA Ativa'}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-500 line-clamp-1">
-                            {lastMsg?.content}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {conversations.length === 0 ? (
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 text-center text-xs text-slate-400">
+                      Nenhuma conversa ativa no momento.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {conversations.slice(0, 3).map((conv) => {
+                        const lastMsg = conv.messages[conv.messages.length - 1];
+                        return (
+                          <button
+                            key={conv.id}
+                            onClick={() => {
+                              setSelectedConversationId(conv.id);
+                              setActiveTab('inbox');
+                            }}
+                            className="w-full text-left p-3 rounded-xl hover:bg-slate-50 border border-slate-100 transition space-y-1"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-slate-900">
+                                {conv.patient.name}
+                              </span>
+                              <span
+                                style={
+                                  conv.status !== 'WAITING_HUMAN'
+                                    ? {
+                                        backgroundColor: `${brandColor}15`,
+                                        color: brandColor,
+                                      }
+                                    : undefined
+                                }
+                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  conv.status === 'WAITING_HUMAN'
+                                    ? 'bg-rose-50 text-rose-600'
+                                    : ''
+                                }`}
+                              >
+                                {conv.status === 'WAITING_HUMAN' ? 'Aguardando' : 'IA Ativa'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 line-clamp-1">
+                              {lastMsg?.content}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1540,60 +1447,78 @@ export default function OdontoAiCompleteWorkspace() {
               </div>
 
               <div className="divide-y divide-slate-100 overflow-y-auto flex-1 min-h-0">
-                {conversations.map((conv) => {
-                  const isSelected = conv.id === selectedConversation?.id;
-                  const lastMsg = conv.messages[conv.messages.length - 1];
+                {conversations.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400">
+                    Nenhuma conversa recebida ainda.
+                  </div>
+                ) : (
+                  conversations.map((conv) => {
+                    const isSelected = conv.id === selectedConversation?.id;
+                    const lastMsg = conv.messages[conv.messages.length - 1];
 
-                  return (
-                    <button
-                      key={conv.id}
-                      onClick={() => setSelectedConversationId(conv.id)}
-                      style={
-                        isSelected ? { backgroundColor: `${brandColor}12` } : undefined
-                      }
-                      className={`w-full text-left p-4 transition flex items-start gap-3 ${
-                        !isSelected ? 'hover:bg-slate-50' : ''
-                      }`}
-                    >
-                      <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-700 font-semibold text-xs flex items-center justify-center shrink-0 mt-0.5">
-                        {getInitials(conv.patient.name)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-semibold text-slate-900 truncate">
-                            {conv.patient.name}
-                          </span>
-                          {conv.status === 'WAITING_HUMAN' ? (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500 text-white">
-                              Urgente
-                            </span>
-                          ) : conv.status === 'HUMAN_HANDLING' ? (
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
-                              Manual
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                backgroundColor: `${brandColor}15`,
-                                color: brandColor,
-                              }}
-                              className="text-[10px] font-medium px-2 py-0.5 rounded-full"
-                            >
-                              IA
-                            </span>
-                          )}
+                    return (
+                      <button
+                        key={conv.id}
+                        onClick={() => setSelectedConversationId(conv.id)}
+                        style={
+                          isSelected ? { backgroundColor: `${brandColor}12` } : undefined
+                        }
+                        className={`w-full text-left p-4 transition flex items-start gap-3 ${
+                          !isSelected ? 'hover:bg-slate-50' : ''
+                        }`}
+                      >
+                        <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-700 font-semibold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          {getInitials(conv.patient.name)}
                         </div>
-                        <p className="text-xs text-slate-500 truncate mt-1">
-                          {lastMsg?.content}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-semibold text-slate-900 truncate">
+                              {conv.patient.name}
+                            </span>
+                            {conv.status === 'WAITING_HUMAN' ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500 text-white">
+                                Urgente
+                              </span>
+                            ) : conv.status === 'HUMAN_HANDLING' ? (
+                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                                Manual
+                              </span>
+                            ) : (
+                              <span
+                                style={{
+                                  backgroundColor: `${brandColor}15`,
+                                  color: brandColor,
+                                }}
+                                className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+                              >
+                                IA
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 truncate mt-1">
+                            {lastMsg?.content}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
               </div>
             </div>
 
-            {selectedConversation && (
+            {!selectedConversation ? (
+              <div className="md:col-span-8 flex flex-col items-center justify-center p-8 text-center bg-slate-50/40">
+                <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3">
+                  <MessageSquare className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-700">
+                  Nenhuma conversa selecionada
+                </h3>
+                <p className="text-xs text-slate-400 max-w-xs mt-1">
+                  Assim que um paciente enviar mensagem para o WhatsApp da clínica, o histórico aparecerá aqui em tempo real.
+                </p>
+              </div>
+            ) : (
               <div className="md:col-span-8 flex flex-col h-full min-h-0 overflow-hidden bg-slate-50/40">
                 <div className="bg-white px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-3">
@@ -1693,52 +1618,8 @@ export default function OdontoAiCompleteWorkspace() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Barra de Envio com Seletor: Simular Paciente vs Responder como Recepção */}
-                <div className="p-3.5 bg-white border-t border-slate-100 space-y-2.5 shrink-0">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
-                      <button
-                        type="button"
-                        onClick={() => setChatSenderMode('PATIENT')}
-                        style={
-                          chatSenderMode === 'PATIENT'
-                            ? { backgroundColor: brandColor, color: '#ffffff' }
-                            : undefined
-                        }
-                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
-                          chatSenderMode === 'PATIENT'
-                            ? 'shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        👤 Enviar como Cliente ({selectedConversation.patient.name.split(' ')[0]})
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setChatSenderMode('HUMAN_STAFF')}
-                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
-                          chatSenderMode === 'HUMAN_STAFF'
-                            ? 'bg-slate-900 text-white shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        👩‍💼 Responder como Recepção
-                      </button>
-                    </div>
-
-                    {chatSenderMode === 'PATIENT' &&
-                      selectedConversation.status !== 'AI_HANDLING' && (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleConversationMode(selectedConversation)}
-                          className="text-[11px] font-semibold text-rose-600 hover:underline"
-                        >
-                          ⚠️ IA pausada nesta conversa (Clique para ativar)
-                        </button>
-                      )}
-                  </div>
-
+                {/* Barra de Resposta Manual da Recepcionista */}
+                <div className="p-3.5 bg-white border-t border-slate-100 shrink-0">
                   <form
                     onSubmit={handleSendStaffMessage}
                     className="flex items-center gap-2.5"
@@ -1747,24 +1628,16 @@ export default function OdontoAiCompleteWorkspace() {
                       type="text"
                       value={staffReplyText}
                       onChange={(e) => setStaffReplyText(e.target.value)}
-                      placeholder={
-                        chatSenderMode === 'PATIENT'
-                          ? `Escreva como o cliente ${selectedConversation.patient.name.split(' ')[0]} para a IA responder...`
-                          : 'Escreva a resposta manual da recepcionista...'
-                      }
-                      className="flex-1 text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:outline-none"
+                      placeholder="Responder paciente manualmente como recepção (pausa a IA automaticamente)..."
+                      className="flex-1 text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-slate-400"
                     />
                     <button
                       type="submit"
-                      disabled={isAiTypingInChat}
-                      style={{
-                        backgroundColor:
-                          chatSenderMode === 'PATIENT' ? brandColor : '#0f172a',
-                      }}
-                      className="px-4 py-2.5 rounded-xl hover:opacity-95 text-white text-xs font-semibold flex items-center gap-1.5 transition shrink-0"
+                      style={{ backgroundColor: brandColor }}
+                      className="px-4 py-2.5 rounded-xl hover:opacity-95 text-white text-xs font-semibold flex items-center gap-1.5 transition shrink-0 shadow-xs"
                     >
                       <Send className="w-3.5 h-3.5" />
-                      {chatSenderMode === 'PATIENT' ? 'Mandar p/ IA' : 'Enviar'}
+                      Enviar Mensagem
                     </button>
                   </form>
                 </div>
@@ -1774,60 +1647,107 @@ export default function OdontoAiCompleteWorkspace() {
         )}
 
         {/* =========================================================
-            VISÃO 3: CORPO CLÍNICO
+            VISÃO 3: CORPO CLÍNICO (CADASTRO E GESTÃO DE PROFISSIONAIS)
         ========================================================= */}
         {activeTab === 'dentists' && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-xl font-bold text-slate-900">Profissionais da Clínica</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Especialistas sincronizados com o motor de agendamento da IA
-              </p>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Profissionais da Clínica</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Cadastre os dentistas da clínica para sincronizar automaticamente com a agenda e a IA
+                </p>
+              </div>
+
+              <button
+                onClick={() => setIsDentistModalOpen(true)}
+                style={{ backgroundColor: brandColor }}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-semibold shadow-sm hover:opacity-95 transition"
+              >
+                <Plus className="w-4 h-4" />
+                Cadastrar Profissional
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {clinic.dentists.map((dentist) => {
-                const count = activeAppointments.filter(
-                  (a) => a.dentist.id === dentist.id
-                ).length;
+            {clinic.dentists.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center shadow-sm space-y-4">
+                <div
+                  style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto"
+                >
+                  <Stethoscope className="w-7 h-7" />
+                </div>
+                <div className="max-w-md mx-auto space-y-1">
+                  <h3 className="text-base font-bold text-slate-900">
+                    Nenhum profissional cadastrado ainda
+                  </h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Adicione os dentistas e especialistas da sua clínica para organizar a agenda por profissional e permitir que a IA agende consultas diretamente com eles.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsDentistModalOpen(true)}
+                  style={{ backgroundColor: brandColor }}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-xs font-semibold shadow-sm hover:opacity-95 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  Cadastrar Primeiro Dentista
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {clinic.dentists.map((dentist) => {
+                  const count = activeAppointments.filter(
+                    (a) => a.dentist.id === dentist.id
+                  ).length;
 
-                return (
-                  <div
-                    key={dentist.id}
-                    className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3.5">
-                        <div
-                          className="w-11 h-11 rounded-xl text-white font-bold text-sm flex items-center justify-center"
-                          style={{ backgroundColor: dentist.color }}
-                        >
-                          {getInitials(dentist.name)}
+                  return (
+                    <div
+                      key={dentist.id}
+                      className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3.5">
+                          <div
+                            className="w-11 h-11 rounded-xl text-white font-bold text-sm flex items-center justify-center"
+                            style={{ backgroundColor: dentist.color }}
+                          >
+                            {getInitials(dentist.name)}
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-base text-slate-900">
+                              {dentist.name}
+                            </h3>
+                            <p className="text-xs text-slate-500">
+                              {dentist.specialty} • CRO {dentist.cro}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="font-bold text-base text-slate-900">
-                            {dentist.name}
-                          </h3>
-                          <p className="text-xs text-slate-500">
-                            {dentist.specialty} • CRO {dentist.cro}
-                          </p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                            Agenda Ativa
+                          </span>
+                          <button
+                            onClick={() => handleDeleteDentist(dentist.id)}
+                            title="Remover Profissional"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
-                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">
-                        Agenda Ativa
-                      </span>
-                    </div>
 
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                      <span>Horário: Seg a Sex (08:00 às 18:00)</span>
-                      <span className="font-semibold text-slate-700">
-                        {count} pacientes hoje
-                      </span>
+                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                        <span>Horário: Seg a Sex (08:00 às 18:00)</span>
+                        <span className="font-semibold text-slate-700">
+                          {count} pacientes hoje
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -2072,133 +1992,162 @@ export default function OdontoAiCompleteWorkspace() {
                 </div>
                 <div>
                   <h4 className="font-bold text-base text-slate-900">
-                    Aparelho Conectado Ativo
+                    WhatsApp Real Conectado!
                   </h4>
                   <p className="text-xs text-slate-500 mt-1">
-                    A assistente <strong>{clinic.aiAssistantName}</strong> está recebendo e respondendo mensagens no número <strong>{clinic.phone}</strong>.
+                    Conectado ao número <strong>{connectedWhatsAppPhone || clinic.phone}</strong>. A assistente <strong>{clinic.aiAssistantName}</strong> já está pronta para responder!
+                  </p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-100 text-left text-xs text-sky-900 space-y-1">
+                  <strong>💡 Como testar no seu celular agora:</strong>
+                  <p>
+                    Envie uma mensagem para <strong>você mesmo</strong> no WhatsApp (ou peça para alguém te mandar) dizendo: <em>&quot;Oi Sofia, queria ver horário de limpeza&quot;</em>!
                   </p>
                 </div>
                 <div className="pt-2 flex justify-center gap-3">
                   <button
-                    onClick={() => {
-                      setIsWhatsAppConnected(false);
-                      setQrStep('QRCODE');
-                    }}
-                    className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                    onClick={handleDisconnectRealWhatsApp}
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-rose-600 hover:bg-rose-50"
                   >
-                    Trocar Aparelho / Gerar Novo QR Code
+                    Desconectar / Gerar Novo QR Code
                   </button>
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  Abra o WhatsApp no celular da recepção, vá em <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong> e aponte a câmera para o código abaixo:
+                  Abra o WhatsApp no seu celular, vá em <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong> e aponte a câmera para o QR Code real abaixo:
                 </p>
 
-                {/* QR Code Visual Limpo */}
+                {/* QR Code Real Gerado pelo Baileys */}
                 <div className="flex flex-col items-center justify-center p-5 bg-slate-50 rounded-2xl border border-slate-200/80">
-                  <div className="w-44 h-44 bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex items-center justify-center relative">
-                    <QrCode className="w-36 h-36 text-slate-900" strokeWidth={1.3} />
-                    {qrStep === 'CONNECTING' && (
-                      <div className="absolute inset-0 bg-white/90 rounded-xl flex flex-col items-center justify-center gap-2">
-                        <RefreshCw className="w-6 h-6 animate-spin" style={{ color: brandColor }} />
-                        <span className="text-xs font-semibold text-slate-700">
-                          Sincronizando conversas...
+                  <div className="w-56 h-56 bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex items-center justify-center relative">
+                    {realQrCodeUrl ? (
+                      <img
+                        src={realQrCodeUrl}
+                        alt="WhatsApp QR Code Real"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 text-center p-4">
+                        <RefreshCw
+                          className="w-7 h-7 animate-spin"
+                          style={{ color: brandColor }}
+                        />
+                        <span className="text-xs font-semibold text-slate-600">
+                          Gerando QR Code Oficial do WhatsApp...
                         </span>
                       </div>
                     )}
                   </div>
-                  <span className="text-[11px] font-mono text-slate-400 mt-2">
-                    Instância: clinica-sorriso-perfeito
+                  <span className="text-[11px] font-medium text-emerald-700 mt-2.5">
+                    🔒 Filtro de segurança ativo: ignora grupos e conversas pessoais sem palavras odontológicas
                   </span>
                 </div>
-
-                <button
-                  onClick={handleSimulateQrScan}
-                  style={{ backgroundColor: brandColor }}
-                  className="w-full py-2.5 rounded-xl text-white text-xs font-semibold shadow-sm hover:opacity-95 transition"
-                >
-                  Simular Leitura do QR Code pelo Celular
-                </button>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* MODAL SIMULADOR DE WHATSAPP */}
-      {isSimulatorOpen && (
+      {/* MODAL CADASTRAR NOVO PROFISSIONAL (DENTISTA) */}
+      {isDentistModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 space-y-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4" style={{ color: brandColor }} />
+                <Stethoscope className="w-4 h-4" style={{ color: brandColor }} />
                 <h3 className="font-bold text-sm text-slate-900">
-                  Simular Paciente no WhatsApp
+                  Cadastrar Novo Profissional
                 </h3>
               </div>
               <button
-                onClick={() => setIsSimulatorOpen(false)}
+                onClick={() => setIsDentistModalOpen(false)}
                 className="text-slate-400 hover:text-slate-600"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() =>
-                  setSimMessageText('Olá! Quais horários têm livres amanhã?')
-                }
-                className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg font-medium"
-              >
-                1. Perguntar horários
-              </button>
-              <button
-                type="button"
-                onClick={() => setSimMessageText('Quero agendar às 10:30 por favor')}
-                className="text-[11px] bg-sky-50 hover:bg-sky-100 text-sky-700 px-2.5 py-1.5 rounded-lg font-medium"
-              >
-                2. Agendar às 10:30
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setSimMessageText('Estou com dor forte no dente, preciso de encaixe urgente!')
-                }
-                className="text-[11px] bg-rose-50 hover:bg-rose-100 text-rose-700 px-2.5 py-1.5 rounded-lg font-medium"
-              >
-                3. Simular urgência
-              </button>
-            </div>
-
-            <form onSubmit={handleSimulatePatientWhatsApp} className="space-y-3">
-              <input
-                type="text"
-                value={simPatientName}
-                onChange={(e) => setSimPatientName(e.target.value)}
-                placeholder="Nome do paciente"
-                className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2"
-                required
-              />
-              <textarea
-                rows={3}
-                value={simMessageText}
-                onChange={(e) => setSimMessageText(e.target.value)}
-                className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2"
-                required
-              />
-              <div className="flex justify-end gap-2">
-                <button
-                  type="submit"
-                  style={{ backgroundColor: brandColor }}
-                  className="px-4 py-2 rounded-xl hover:opacity-95 text-white text-xs font-semibold"
-                >
-                  Enviar no WhatsApp
-                </button>
+            <form onSubmit={handleCreateDentist} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nome do(a) Dentista
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Dr. Carlos Eduardo"
+                  value={dentistForm.name}
+                  onChange={(e) =>
+                    setDentistForm((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2"
+                />
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Registro CRO
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: SP-102938"
+                  value={dentistForm.cro}
+                  onChange={(e) =>
+                    setDentistForm((prev) => ({ ...prev, cro: e.target.value }))
+                  }
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Especialidade Principal
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Implantodontia, Ortodontia, Clínica Geral"
+                  value={dentistForm.specialty}
+                  onChange={(e) =>
+                    setDentistForm((prev) => ({ ...prev, specialty: e.target.value }))
+                  }
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Cor de Identificação na Agenda
+                </label>
+                <div className="flex items-center gap-2">
+                  {BRAND_PRESETS.map((preset) => (
+                    <button
+                      key={preset.color}
+                      type="button"
+                      onClick={() =>
+                        setDentistForm((prev) => ({ ...prev, color: preset.color }))
+                      }
+                      className={`w-7 h-7 rounded-full border-2 transition ${
+                        dentistForm.color === preset.color
+                          ? 'border-slate-900 scale-110'
+                          : 'border-transparent'
+                      }`}
+                      style={{ backgroundColor: preset.color }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                style={{ backgroundColor: brandColor }}
+                className="w-full py-2.5 rounded-xl hover:opacity-95 text-white text-xs font-semibold shadow-sm mt-2"
+              >
+                Salvar Profissional
+              </button>
             </form>
           </div>
         </div>
@@ -2246,11 +2195,15 @@ export default function OdontoAiCompleteWorkspace() {
                 }
                 className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2 bg-white"
               >
-                {clinic.dentists.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
+                {clinic.dentists.length === 0 ? (
+                  <option value="">Plantonista da Clínica (Sem profissional cadastrado)</option>
+                ) : (
+                  clinic.dentists.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.specialty})
+                    </option>
+                  ))
+                )}
               </select>
               <select
                 value={bookingForm.procedureId}
