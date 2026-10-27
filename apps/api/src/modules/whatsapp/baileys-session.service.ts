@@ -50,12 +50,16 @@ export interface LiveWhatsAppAppointment {
   procedureName: string;
 }
 
-type AiReplyGenerator = (input: {
+export type AiReplyGenerator = (input: {
   patientName: string;
   patientPhone: string;
   messageHistory: { sender: 'PATIENT' | 'AI' | 'HUMAN_STAFF'; content: string }[];
   newMessage: string;
+  occupiedSlots?: { time: string; dentistName: string; patientName: string }[];
+  patientActiveAppointment?: { time: string; dentistName: string; procedureName: string } | null;
 }) => Promise<{
+  provider?: string;
+  reply: string;
   bubbles: string[];
   bookedAction: {
     time: string;
@@ -81,14 +85,12 @@ class BaileysSessionService {
   private isInitializing = false;
   private aiGenerator: AiReplyGenerator | null = null;
 
-  // Guarda conversas e agendamentos reais vindos do WhatsApp conectado
   public liveConversations = new Map<string, LiveWhatsAppConversation>();
   public liveAppointments: LiveWhatsAppAppointment[] = [];
   private activeTestJids = new Set<string>();
   private sentMessageIds = new Set<string>();
 
   constructor() {
-    // Se já houver sessão salva em baileys_auth_info, reconecta automaticamente ao iniciar o servidor
     const credsFile = path.resolve(process.cwd(), 'baileys_auth_info', 'creds.json');
     if (fs.existsSync(credsFile)) {
       setTimeout(() => {
@@ -173,7 +175,6 @@ class BaileysSessionService {
           if (shouldReconnect) {
             setTimeout(() => this.startSession(), 3000);
           } else {
-            // Limpa pasta de sessão caso tenha desconectado pelo celular
             const authPath = path.resolve(process.cwd(), 'baileys_auth_info');
             if (fs.existsSync(authPath)) {
               fs.rmSync(authPath, { recursive: true, force: true });
@@ -182,7 +183,6 @@ class BaileysSessionService {
         }
       });
 
-      // Escuta mensagens reais do WhatsApp!
       sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
@@ -192,7 +192,6 @@ class BaileysSessionService {
           const remoteJid = msg.key.remoteJid;
           const msgId = msg.key.id || '';
 
-          // 1. Ignora Grupos, Status e mensagens que o próprio Bot acabou de enviar
           if (
             remoteJid.endsWith('@g.us') ||
             remoteJid.includes('broadcast') ||
@@ -202,7 +201,6 @@ class BaileysSessionService {
             continue;
           }
 
-          // Extrai texto mesmo se o WhatsApp do cliente estiver com "Mensagens Temporárias" (ephemeralMessage) ativo
           const innerMsg =
             msg.message.ephemeralMessage?.message ||
             msg.message.viewOnceMessage?.message ||
@@ -246,8 +244,6 @@ class BaileysSessionService {
             `📩 [WhatsApp Real] De: ${remoteJid} | fromMe: ${msg.key.fromMe} | Texto: "${text}"`
           );
 
-          // Se a mensagem partiu do próprio aparelho conectado (fromMe = true),
-          // só aciona a IA se for conversa consigo mesmo (Self-Chat) ou tiver palavra-chave de teste
           if (msg.key.fromMe && !isSelfChat && !hasExplicitTrigger) {
             continue;
           }
@@ -293,9 +289,6 @@ class BaileysSessionService {
     return { status: 'DISCONNECTED' };
   }
 
-  /**
-   * Permite à Recepcionista Humana enviar mensagem real pelo Painel Web para o celular do paciente
-   */
   async sendManualStaffMessage(remoteJid: string, text: string) {
     const conv = this.liveConversations.get(remoteJid);
     if (conv) {
@@ -319,9 +312,196 @@ class BaileysSessionService {
   }
 
   /**
-   * Simulador Standalone (Painel de Teste sem WhatsApp):
-   * Processa a mensagem com a IA real, atualiza a agenda e sincroniza com o Painel Principal sem precisar de celular conectado.
+   * Aplica travas determinísticas de negócio sobre o resultado da IA:
+   * 1. Bloqueio de Duplo Agendamento (Overbooking no mesmo horário/dentista)
+   * 2. Bloqueio de Agendamento fora do expediente (08:00 às 18:00)
+   * 3. Remarcação inteligente (Substitui consulta ativa anterior do mesmo paciente sem duplicar)
+   * 4. Validação de Cancelamento (Só confirma cancelamento se o paciente realmente tinha consulta ativa)
    */
+  private applyDeterministicClinicRules(
+    conv: LiveWhatsAppConversation,
+    aiResult: Awaited<ReturnType<AiReplyGenerator>>
+  ) {
+    const firstName = conv.patient.name.split(' ')[0];
+    const cleanPatientPhone = conv.patient.phone.replace(/\D/g, '');
+
+    if (aiResult.handoffAction) {
+      conv.status = 'WAITING_HUMAN';
+      conv.urgency = 'HIGH';
+      conv.handoffReason = aiResult.handoffAction.reason;
+    }
+
+    // Validação Determinística de Cancelamento
+    if (aiResult.cancelledAction && !aiResult.bookedAction) {
+      const hadActive = this.liveAppointments.some(
+        (a) =>
+          a.status !== 'CANCELLED' &&
+          (a.patient.id === conv.patient.id ||
+            a.patient.phone.replace(/\D/g, '') === cleanPatientPhone)
+      );
+
+      if (hadActive) {
+        this.liveAppointments = this.liveAppointments.map((a) =>
+          a.patient.id === conv.patient.id ||
+          a.patient.phone.replace(/\D/g, '') === cleanPatientPhone
+            ? { ...a, status: 'CANCELLED' }
+            : a
+        );
+      } else {
+        // Paciente não tinha consulta ativa! Evita falso positivo
+        aiResult.cancelledAction = null;
+        const msg1 = `Oi, ${firstName}! Procurei aqui pelo seu número (${conv.patient.phone}) na agenda de hoje e não localizei nenhuma consulta ativa marcada.`;
+        const msg2 = `Por acaso você agendou usando outro telefone ou em nome de outra pessoa? Me confirma aqui para eu verificar certinho!`;
+        aiResult.bubbles = [msg1, msg2];
+        aiResult.reply = `${msg1}\n\n${msg2}`;
+      }
+    }
+
+    // Validação Determinística de Agendamento / Remarcação
+    if (aiResult.bookedAction) {
+      const rawTime = aiResult.bookedAction.time || '11:00';
+      const [hh, mm] = rawTime.split(':').map(Number);
+      const normalizedTime = `${String(isNaN(hh) ? 11 : hh).padStart(2, '0')}:${String(
+        isNaN(mm) ? 0 : mm
+      ).padStart(2, '0')}`;
+
+      // REGRA 1: Fora do horário de funcionamento (08:00 às 18:00)
+      if (isNaN(hh) || hh < 8 || hh >= 18) {
+        aiResult.bookedAction = null;
+        const msg1 = `Oi, ${firstName}! Nosso horário de atendimento é das 08:00 às 18:00, então às ${rawTime} a clínica está fechada. 😊`;
+        const msg2 = `Temos horários disponíveis às 09:00, 10:30, 14:00 ou 16:00. Qual desses fica melhor para você?`;
+        aiResult.bubbles = [msg1, msg2];
+        aiResult.reply = `${msg1}\n\n${msg2}`;
+        return;
+      }
+
+      const targetDentist = (aiResult.bookedAction.dentistName || '').trim().toLowerCase();
+
+      // REGRA 2: Verifica se OUTRO paciente já ocupou esse mesmo horário com esse mesmo dentista
+      const conflictingAppt = this.liveAppointments.find((a) => {
+        if (a.status === 'CANCELLED') return false;
+        const isSamePatient =
+          a.patient.id === conv.patient.id ||
+          a.patient.phone.replace(/\D/g, '') === cleanPatientPhone;
+        if (isSamePatient) return false;
+
+        const apptTime = new Date(a.startTime).toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        const sameTime = apptTime === normalizedTime;
+        const sameDentist =
+          a.dentistName.toLowerCase().includes(targetDentist) ||
+          targetDentist.includes(a.dentistName.toLowerCase());
+        return sameTime && sameDentist;
+      });
+
+      if (conflictingAppt) {
+        const standardSlots = ['09:00', '10:30', '14:00', '16:00'];
+        const occupiedForDentist = this.liveAppointments
+          .filter(
+            (a) =>
+              a.status !== 'CANCELLED' &&
+              (a.dentistName.toLowerCase().includes(targetDentist) ||
+                targetDentist.includes(a.dentistName.toLowerCase()))
+          )
+          .map((a) =>
+            new Date(a.startTime).toLocaleTimeString('pt-BR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          );
+        const freeSlots = standardSlots.filter((s) => !occupiedForDentist.includes(s));
+        const suggestion =
+          freeSlots.length > 0 ? freeSlots.slice(0, 2).join(' ou ') : '14:30 ou 16:30';
+
+        const dName = aiResult.bookedAction.dentistName;
+        aiResult.bookedAction = null;
+        const msg1 = `Ops, ${firstName}! Acabei de checar na agenda e o horário das ${normalizedTime} com ${dName} já foi preenchido hoje. 😅`;
+        const msg2 = `Mas ainda tenho vaga livre com ${dName} às ${suggestion}. Algum desses dois horários fica bom para você?`;
+        aiResult.bubbles = [msg1, msg2];
+        aiResult.reply = `${msg1}\n\n${msg2}`;
+        return;
+      }
+
+      // REGRA 3: Se o MESMO paciente já tinha um horário ativo hoje, é uma REMARCAÇÃO (cancela o anterior para não duplicar!)
+      const previousActiveAppt = this.liveAppointments.find(
+        (a) =>
+          a.status !== 'CANCELLED' &&
+          (a.patient.id === conv.patient.id ||
+            a.patient.phone.replace(/\D/g, '') === cleanPatientPhone)
+      );
+
+      if (previousActiveAppt) {
+        this.liveAppointments = this.liveAppointments.map((a) =>
+          a.id === previousActiveAppt.id ? { ...a, status: 'CANCELLED' } : a
+        );
+      }
+
+      const start = new Date();
+      start.setHours(hh, isNaN(mm) ? 0 : mm, 0, 0);
+      const end = new Date(start.getTime() + 30 * 60000);
+      const savedPhone = aiResult.bookedAction.contactPhone || conv.patient.phone;
+
+      this.liveAppointments.push({
+        id: `wa-appt-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        status: 'CONFIRMED',
+        bookedByAi: true,
+        reminderSent: false,
+        patient: {
+          ...conv.patient,
+          phone: savedPhone,
+        },
+        dentistName: aiResult.bookedAction.dentistName,
+        procedureName: aiResult.bookedAction.procedureName,
+      });
+
+      // Garante confirmação humanizada em 2 balões + validação do número de contato salvo
+      const msg1 = previousActiveAppt
+        ? `Prontinho, ${firstName}! Já remarquei sua consulta para hoje às ${normalizedTime} com ${aiResult.bookedAction.dentistName}. ✅`
+        : `Prontinho, ${firstName}! Deixei agendada sua consulta (${aiResult.bookedAction.procedureName}) com ${aiResult.bookedAction.dentistName} para hoje às ${normalizedTime}. ✅`;
+      const msg2 = `Só para eu deixar salvo certinho na ficha da recepção: seu melhor número para contato é este mesmo (${savedPhone})?`;
+
+      aiResult.bubbles = [msg1, msg2];
+      aiResult.reply = `${msg1}\n\n${msg2}`;
+    }
+  }
+
+  private getSchedulingContextForPatient(conv: LiveWhatsAppConversation) {
+    const cleanPhone = conv.patient.phone.replace(/\D/g, '');
+    const occupiedSlots = this.liveAppointments
+      .filter((a) => a.status !== 'CANCELLED')
+      .map((a) => ({
+        time: new Date(a.startTime).toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        dentistName: a.dentistName,
+        patientName: a.patient.name,
+      }));
+
+    const existing = this.liveAppointments.find(
+      (a) =>
+        a.status !== 'CANCELLED' &&
+        (a.patient.id === conv.patient.id || a.patient.phone.replace(/\D/g, '') === cleanPhone)
+    );
+
+    const patientActiveAppointment = existing
+      ? {
+          time: new Date(existing.startTime).toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          dentistName: existing.dentistName,
+          procedureName: existing.procedureName,
+        }
+      : null;
+
+    return { occupiedSlots, patientActiveAppointment };
+  }
+
   async simulateIncomingMessage(input: {
     phone: string;
     patientName: string;
@@ -377,48 +557,18 @@ class BaileysSessionService {
       };
     }
 
+    const { occupiedSlots, patientActiveAppointment } = this.getSchedulingContextForPatient(conv);
+
     const aiResult = await this.aiGenerator({
       patientName: conv.patient.name,
       patientPhone: conv.patient.phone,
       messageHistory: historyForAi,
       newMessage: input.text,
+      occupiedSlots,
+      patientActiveAppointment,
     });
 
-    if (aiResult.handoffAction) {
-      conv.status = 'WAITING_HUMAN';
-      conv.urgency = 'HIGH';
-      conv.handoffReason = aiResult.handoffAction.reason;
-    }
-
-    if (aiResult.cancelledAction) {
-      this.liveAppointments = this.liveAppointments.map((a) =>
-        a.patient.id === conv!.patient.id || a.patient.phone === conv!.patient.phone
-          ? { ...a, status: 'CANCELLED' }
-          : a
-      );
-    }
-
-    if (aiResult.bookedAction) {
-      const [hh, mm] = (aiResult.bookedAction.time || '11:00').split(':').map(Number);
-      const start = new Date();
-      start.setHours(isNaN(hh) ? 11 : hh, isNaN(mm) ? 0 : mm, 0, 0);
-      const end = new Date(start.getTime() + 30 * 60000);
-
-      this.liveAppointments.push({
-        id: `wa-appt-${Date.now()}`,
-        startTime: start.toISOString(),
-        endTime: end.toISOString(),
-        status: 'CONFIRMED',
-        bookedByAi: true,
-        reminderSent: false,
-        patient: {
-          ...conv.patient,
-          phone: aiResult.bookedAction.contactPhone || conv.patient.phone,
-        },
-        dentistName: aiResult.bookedAction.dentistName,
-        procedureName: aiResult.bookedAction.procedureName,
-      });
-    }
+    this.applyDeterministicClinicRules(conv, aiResult);
 
     for (const bubble of aiResult.bubbles) {
       conv.messages.push({
@@ -508,59 +658,28 @@ class BaileysSessionService {
     });
     conv.lastMessageAt = new Date().toISOString();
 
-    // Se a conversa estiver pausada para humano, não responde com IA
     if (conv.status !== 'AI_HANDLING' || !this.aiGenerator) {
       return;
     }
 
     try {
-      // Simula "digitando..." no WhatsApp real do paciente
       if (this.sock) {
         await this.sock.sendPresenceUpdate('composing', remoteJid);
       }
+
+      const { occupiedSlots, patientActiveAppointment } = this.getSchedulingContextForPatient(conv);
 
       const aiResult = await this.aiGenerator({
         patientName: conv.patient.name,
         patientPhone: conv.patient.phone,
         messageHistory: historyForAi,
         newMessage: text,
+        occupiedSlots,
+        patientActiveAppointment,
       });
 
-      if (aiResult.handoffAction) {
-        conv.status = 'WAITING_HUMAN';
-        conv.urgency = 'HIGH';
-        conv.handoffReason = aiResult.handoffAction.reason;
-      }
+      this.applyDeterministicClinicRules(conv, aiResult);
 
-      if (aiResult.cancelledAction) {
-        this.liveAppointments = this.liveAppointments.map((a) =>
-          a.patient.phone === phone ? { ...a, status: 'CANCELLED' } : a
-        );
-      }
-
-      if (aiResult.bookedAction) {
-        const [hh, mm] = (aiResult.bookedAction.time || '11:00').split(':').map(Number);
-        const start = new Date();
-        start.setHours(isNaN(hh) ? 11 : hh, isNaN(mm) ? 0 : mm, 0, 0);
-        const end = new Date(start.getTime() + 30 * 60000);
-
-        this.liveAppointments.push({
-          id: `wa-appt-${Date.now()}`,
-          startTime: start.toISOString(),
-          endTime: end.toISOString(),
-          status: 'CONFIRMED',
-          bookedByAi: true,
-          reminderSent: false,
-          patient: {
-            ...conv.patient,
-            phone: aiResult.bookedAction.contactPhone || phone,
-          },
-          dentistName: aiResult.bookedAction.dentistName,
-          procedureName: aiResult.bookedAction.procedureName,
-        });
-      }
-
-      // Envia cada balão curto no WhatsApp real com pausa humana
       for (const bubble of aiResult.bubbles) {
         if (this.sock && this.status === 'CONNECTED') {
           const sent = await this.sock.sendMessage(remoteJid, { text: bubble });
