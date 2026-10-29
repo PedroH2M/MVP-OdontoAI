@@ -1,7 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
 import { ArrowLeft, RefreshCw, CheckCircle2, ShieldCheck, HelpCircle, Mail, AlertCircle } from 'lucide-react';
-import LegalFooter from '@/components/LegalFooter';
 
 export const metadata = {
   title: 'Política de Cancelamento e Reembolso — OdontoAI',
@@ -206,7 +205,10 @@ export default function PoliticaDeReembolsoPage() {
         </div>
       </main>
 
-      <LegalFooter />
+      <footer className="mt-12 py-8 border-t border-slate-200 text-center text-xs text-slate-500">
+        <p>© {new Date().getFullYear()} OdontoAI Tecnologia & Gestão Odontológica Ltda. CNPJ 52.184.903/0001-44</p>
+        <p className="mt-1">Av. Paulista, 1000 - Sala 402, São Paulo - SP • suporte@odontoai.com.br</p>
+      </footer>
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
 import { ShieldCheck, ArrowLeft, Lock, FileText, CheckCircle2, Mail, MapPin } from 'lucide-react';
-import LegalFooter from '@/components/LegalFooter';
 
 export const metadata = {
   title: 'Política de Privacidade e Proteção de Dados (LGPD) — OdontoAI',
@@ -276,7 +275,10 @@ export default function PoliticaDePrivacidadePage() {
         </div>
       </main>
 
-      <LegalFooter />
+      <footer className="mt-12 py-8 border-t border-slate-200 text-center text-xs text-slate-500">
+        <p>© {new Date().getFullYear()} OdontoAI Tecnologia & Gestão Odontológica Ltda. CNPJ 52.184.903/0001-44</p>
+        <p className="mt-1">Av. Paulista, 1000 - Sala 402, São Paulo - SP • suporte@odontoai.com.br • dpo@odontoai.com.br</p>
+      </footer>
     </div>
   );
 }

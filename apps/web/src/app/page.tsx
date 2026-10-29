@@ -29,6 +29,10 @@ import {
   Phone,
   ChevronLeft,
   ChevronRight,
+  Building2,
+  ExternalLink,
+  Scale,
+  FileText,
 } from 'lucide-react';
 import {
   API_BASE_URL,
@@ -36,7 +40,6 @@ import {
   AppointmentItem,
   ConversationItem,
 } from '@/lib/api';
-import LegalFooter from '@/components/LegalFooter';
 
 const BRAND_PRESETS = [
   { name: 'Azul Clínico', color: '#0284c7' },
@@ -110,7 +113,7 @@ export default function OdontoAiCompleteWorkspace() {
   const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(false);
   const [qrStep, setQrStep] = useState<'QRCODE' | 'CONNECTING' | 'CONNECTED'>('QRCODE');
 
-  const [activeTab, setActiveTab] = useState<'today' | 'inbox' | 'dentists' | 'settings'>('today');
+  const [activeTab, setActiveTab] = useState<'today' | 'inbox' | 'dentists' | 'settings' | 'legal'>('today');
   const [clinic, setClinic] = useState<Clinic>(DEMO_CLINIC);
   const [selectedDentistFilter, setSelectedDentistFilter] = useState<string>('ALL');
   const [selectedAgendaDate, setSelectedAgendaDate] = useState<string>(() => toLocalYmd(new Date()));
@@ -1186,6 +1189,27 @@ export default function OdontoAiCompleteWorkspace() {
             </button>
           </div>
 
+          {/* Nova Aba Discreta: Jurídico & LGPD */}
+          <button
+            onClick={() => setActiveTab('legal')}
+            style={
+              activeTab === 'legal'
+                ? { backgroundColor: `${brandColor}15`, color: brandColor }
+                : undefined
+            }
+            className={`w-full flex items-center justify-between py-2 px-3 rounded-xl transition text-xs font-medium ${
+              activeTab === 'legal'
+                ? 'font-semibold bg-slate-100 text-slate-900 border border-slate-200 shadow-2xs'
+                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
+              Jurídico & LGPD
+            </span>
+            <span className="text-[10px] text-slate-400">Termos</span>
+          </button>
+
           <button
             onClick={() => setIsAuthenticated(false)}
             aria-label="Sair da conta e encerrar sessão"
@@ -1194,37 +1218,13 @@ export default function OdontoAiCompleteWorkspace() {
             <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
             Sair da Conta
           </button>
-
-          <div className="pt-1 flex items-center justify-center gap-2 text-[10px] text-slate-500">
-            <Link
-              href="/politica-de-privacidade"
-              className="hover:text-slate-800 transition focus:outline-none focus:underline"
-            >
-              Privacidade
-            </Link>
-            <span>•</span>
-            <Link
-              href="/termos-de-uso"
-              className="hover:text-slate-800 transition focus:outline-none focus:underline"
-            >
-              Termos
-            </Link>
-            <span>•</span>
-            <Link
-              href="/politica-de-reembolso"
-              className="hover:text-slate-800 transition focus:outline-none focus:underline"
-            >
-              Reembolso
-            </Link>
-          </div>
         </div>
       </aside>
 
       {/* =========================================================
-          ÁREA DE CONTEÚDO PRINCIPAL COM SCROLL E RODAPÉ JURÍDICO
+          ÁREA DE CONTEÚDO PRINCIPAL
       ========================================================= */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <main className="flex-1 p-8 max-w-6xl mx-auto w-full">
+      <main className="flex-1 p-8 max-w-6xl mx-auto w-full">
         {/* =========================================================
             VISÃO 1: AGENDA DO DIA + RADAR LATERAL DA IA
         ========================================================= */}
@@ -2289,10 +2289,199 @@ export default function OdontoAiCompleteWorkspace() {
             </div>
           </div>
         )}
-      </main>
 
-      <LegalFooter />
-    </div>
+        {/* =========================================================
+            VISÃO 5: JURÍDICO, LGPD & CONFORMIDADE REGULATÓRIA
+        ========================================================= */}
+        {activeTab === 'legal' && (
+          <div className="space-y-6">
+            {/* Cabeçalho */}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5" style={{ color: brandColor }} />
+                  <h2 className="text-xl font-bold text-slate-900">
+                    Jurídico, LGPD & Conformidade
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Documentação oficial, termos contratuais, governança de dados e registros da plataforma OdontoAI.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200/60">
+                  <Check className="w-3.5 h-3.5" />
+                  Conformidade Ativa (LGPD & CFO)
+                </span>
+              </div>
+            </div>
+
+            {/* Grid dos Documentos Oficiais */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {/* Documento 1: Política de Privacidade */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between hover:border-slate-300 transition">
+                <div className="space-y-2">
+                  <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center font-bold">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-bold text-sm text-slate-900">Política de Privacidade</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Em estrita conformidade com a LGPD (Lei nº 13.709/2018). Detalha bases legais, tratamento de dados, direitos do titular e canal do DPO.
+                  </p>
+                </div>
+                <div className="pt-4 mt-3 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-slate-500">Lei nº 13.709/2018</span>
+                  <Link
+                    href="/politica-de-privacidade"
+                    target="_blank"
+                    className="inline-flex items-center gap-1 text-xs font-semibold hover:underline"
+                    style={{ color: brandColor }}
+                  >
+                    Abrir Documento
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Documento 2: Termos de Serviço & Uso */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between hover:border-slate-300 transition">
+                <div className="space-y-2">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                    <Scale className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-bold text-sm text-slate-900">Termos de Uso do SaaS</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Licença de uso, responsabilidades das partes, garantia de disponibilidade e limites éticos da atuação da inteligência artificial.
+                  </p>
+                </div>
+                <div className="pt-4 mt-3 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-slate-500">Contrato de Licença</span>
+                  <Link
+                    href="/termos-de-uso"
+                    target="_blank"
+                    className="inline-flex items-center gap-1 text-xs font-semibold hover:underline"
+                    style={{ color: brandColor }}
+                  >
+                    Abrir Documento
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Documento 3: Cancelamento & Reembolso */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between hover:border-slate-300 transition">
+                <div className="space-y-2">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-bold text-sm text-slate-900">Cancelamento e Reembolso</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Direito legal de arrependimento em 7 dias (CDC Art. 49) para planos e políticas claras para cancelamentos de consultas presenciais.
+                  </p>
+                </div>
+                <div className="pt-4 mt-3 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-slate-500">CDC Art. 49</span>
+                  <Link
+                    href="/politica-de-reembolso"
+                    target="_blank"
+                    className="inline-flex items-center gap-1 text-xs font-semibold hover:underline"
+                    style={{ color: brandColor }}
+                  >
+                    Abrir Documento
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            {/* Seção 2: Identificação Corporativa + Blindagem Ética CFO */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Dados Oficiais da Empresa */}
+              <div className="lg:col-span-6 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-4">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-slate-600" />
+                  <h3 className="font-bold text-sm text-slate-900">
+                    Dados da Empresa Fornecedora
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Informações societárias e de suporte conforme o Decreto Federal nº 7.962/2013 (Comércio Eletrônico):
+                </p>
+
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/70 space-y-2.5 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-2 border-b border-slate-200/60">
+                    <span className="text-slate-500 font-medium">Razão Social:</span>
+                    <span className="font-semibold text-slate-900">OdontoAI Tecnologia & Gestão Odontológica Ltda.</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-2 border-b border-slate-200/60">
+                    <span className="text-slate-500 font-medium">CNPJ:</span>
+                    <span className="font-semibold text-slate-900">52.184.903/0001-44</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-2 border-b border-slate-200/60">
+                    <span className="text-slate-500 font-medium">Sede Administrativa:</span>
+                    <span className="font-semibold text-slate-900 text-right">Av. Paulista, 1000 - Sala 402, São Paulo - SP</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-2 border-b border-slate-200/60">
+                    <span className="text-slate-500 font-medium">Suporte Técnico ao Cliente:</span>
+                    <a href="mailto:suporte@odontoai.com.br" className="font-semibold text-sky-600 hover:underline">
+                      suporte@odontoai.com.br
+                    </a>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <span className="text-slate-500 font-medium">Encarregado de Dados (DPO LGPD):</span>
+                    <a href="mailto:dpo@odontoai.com.br" className="font-semibold text-sky-600 hover:underline">
+                      dpo@odontoai.com.br
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              {/* Limitações Éticas CFO / CRO */}
+              <div className="lg:col-span-6 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-4">
+                <div className="flex items-center gap-2">
+                  <Stethoscope className="w-4 h-4 text-slate-600" />
+                  <h3 className="font-bold text-sm text-slate-900">
+                    Diretrizes Éticas & Blindagem Jurídica
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Salvaguardas implementadas para conformidade com os Conselhos Federal e Regionais de Odontologia:
+                </p>
+
+                <div className="space-y-3">
+                  <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl text-xs space-y-1">
+                    <span className="font-bold flex items-center gap-1.5 text-blue-950">
+                      ⚖️ Papel Exclusivamente Administrativo
+                    </span>
+                    <p className="text-[11px] text-blue-800 leading-relaxed">
+                      O motor de IA atua como assistente operacional e de recepção. Atos privativos da odontologia (avaliação clínica, diagnóstico e prescrição de medicamentos) são reservados exclusivamente aos cirurgiões-dentistas com CRO ativo (Lei nº 5.081/1966).
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-amber-50/70 border border-amber-100 rounded-xl text-xs space-y-1">
+                    <span className="font-bold flex items-center gap-1.5 text-amber-950">
+                      🚫 Vedação a Preços Fechados e Consultas por Chat
+                    </span>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      A IA não fornece diagnósticos conclusivos nem orçamentos fechados à distância via WhatsApp, cumprindo integralmente o Código de Ética Odontológica (Resolução CFO-118/2012, Art. 34 e Art. 44).
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 border border-slate-200/70 rounded-xl text-xs text-slate-700 flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-slate-600">
+                      🔒 Minimização: Coleta apenas Nome e Telefone para a consulta
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
+                      LGPD Art. 6º, III
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
 
       {/* =========================================================
           MODAL BLOCO 8: CONEXÃO WHATSAPP VIA QR CODE
