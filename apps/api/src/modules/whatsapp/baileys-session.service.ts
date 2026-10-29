@@ -768,6 +768,24 @@ class BaileysSessionService {
     return this.getState();
   }
 
+  clearAllConversations() {
+    this.liveConversations.clear();
+    return this.getState();
+  }
+
+  deleteConversation(conversationIdOrJid: string) {
+    for (const [key, conv] of Array.from(this.liveConversations.entries())) {
+      if (
+        conv.id === conversationIdOrJid ||
+        key === conversationIdOrJid ||
+        conv.remoteJid === conversationIdOrJid
+      ) {
+        this.liveConversations.delete(key);
+      }
+    }
+    return this.getState();
+  }
+
   reactivateAiForConversation(remoteJid: string) {
     const conv = this.liveConversations.get(remoteJid);
     if (conv) {

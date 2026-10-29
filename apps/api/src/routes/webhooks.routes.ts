@@ -820,6 +820,15 @@ COMO CONVERSAR DE FORMA 100% HUMANA, SEM LOOPING E SEM REDUNDÂNCIA NO WHATSAPP:
     return baileysSessionService.resetSimulation(body.phone);
   });
 
+  app.post('/api/whatsapp-real/clear-conversations', async () => {
+    return baileysSessionService.clearAllConversations();
+  });
+
+  app.delete('/api/whatsapp-real/conversations/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    return baileysSessionService.deleteConversation(id);
+  });
+
   app.post('/api/whatsapp-real/reactivate-ai', async (request) => {
     const schema = z.object({
       remoteJid: z.string(),

@@ -570,6 +570,19 @@ export default function OdontoAiCompleteWorkspace() {
     );
   };
 
+  const handleClearAllConversations = async () => {
+    try {
+      await fetch(`${API_BASE_URL}/api/whatsapp-real/clear-conversations`, {
+        method: 'POST',
+      });
+      setConversations([]);
+      setSelectedConversationId(null);
+      showToast('🧹 Todas as conversas antigas foram limpas com sucesso!');
+    } catch {
+      showToast('Erro ao limpar conversas.');
+    }
+  };
+
   const handleSendStaffMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!staffReplyText.trim() || !selectedConversation) return;
@@ -1689,11 +1702,23 @@ export default function OdontoAiCompleteWorkspace() {
         {activeTab === 'inbox' && (
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-12 h-[calc(100vh-5rem)] max-h-[720px] min-h-[520px]">
             <div className="md:col-span-4 border-r border-slate-100 flex flex-col h-full min-h-0 overflow-hidden">
-              <div className="p-4 border-b border-slate-100 shrink-0">
-                <h2 className="font-bold text-sm text-slate-900">Conversas WhatsApp</h2>
-                <p className="text-xs text-slate-500">
-                  Acompanhe ou assuma o atendimento da IA
-                </p>
+              <div className="p-4 border-b border-slate-100 shrink-0 flex items-center justify-between">
+                <div>
+                  <h2 className="font-bold text-sm text-slate-900">Conversas WhatsApp</h2>
+                  <p className="text-xs text-slate-500">
+                    Acompanhe ou assuma o atendimento da IA
+                  </p>
+                </div>
+                {conversations.length > 0 && (
+                  <button
+                    onClick={handleClearAllConversations}
+                    title="Limpar histórico de conversas"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition text-xs flex items-center gap-1 font-medium"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Limpar</span>
+                  </button>
+                )}
               </div>
 
               <div className="divide-y divide-slate-100 overflow-y-auto flex-1 min-h-0">
