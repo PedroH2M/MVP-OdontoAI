@@ -22,6 +22,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { API_BASE_URL } from '@/lib/api';
+import LegalFooter from '@/components/LegalFooter';
 
 interface SimMessage {
   id: string;
@@ -700,6 +701,13 @@ export default function ChatbotSimulatorPage() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+        <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-center text-xs text-slate-400">
+          ⚖️ <strong>Ambiente de Simulação e Homologação Clínica:</strong> Este ambiente destina-se a testes operacionais. Os dados cadastrados são exclusivamente para testes e processados com observância à LGPD e resoluções do CFO/CRO.
+        </div>
+        <LegalFooter />
       </div>
     </div>
   );

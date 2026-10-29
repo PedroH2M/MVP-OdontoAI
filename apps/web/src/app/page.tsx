@@ -36,6 +36,7 @@ import {
   AppointmentItem,
   ConversationItem,
 } from '@/lib/api';
+import LegalFooter from '@/components/LegalFooter';
 
 const BRAND_PRESETS = [
   { name: 'Azul Clínico', color: '#0284c7' },
@@ -206,6 +207,20 @@ export default function OdontoAiCompleteWorkspace() {
   useEffect(() => {
     syncWithBackend();
   }, [syncWithBackend]);
+
+  // Acessibilidade: Fechar modais ao pressionar a tecla Escape (ESC)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsBookingModalOpen(false);
+        setIsDentistModalOpen(false);
+        setIsQrModalOpen(false);
+        setIsSimulatorOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleCreateDentist = (e: React.FormEvent) => {
     e.preventDefault();
@@ -978,9 +993,32 @@ export default function OdontoAiCompleteWorkspace() {
             </button>
           </form>
 
-          <p className="text-[11px] text-center text-slate-400">
-            Ambiente protegido • Recepcionista Virtual {clinic.aiAssistantName} 24/7
+          <p className="text-[11px] text-center text-slate-600">
+            Ambiente protegido com criptografia TLS • Conforme à LGPD (Lei 13.709/2018)
           </p>
+
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-center gap-3 text-[11px] text-slate-600">
+            <Link
+              href="/politica-de-privacidade"
+              className="hover:text-slate-900 underline focus:outline-none focus:ring-1 focus:ring-sky-500 rounded"
+            >
+              Privacidade
+            </Link>
+            <span>•</span>
+            <Link
+              href="/termos-de-uso"
+              className="hover:text-slate-900 underline focus:outline-none focus:ring-1 focus:ring-sky-500 rounded"
+            >
+              Termos de Uso
+            </Link>
+            <span>•</span>
+            <Link
+              href="/politica-de-reembolso"
+              className="hover:text-slate-900 underline focus:outline-none focus:ring-1 focus:ring-sky-500 rounded"
+            >
+              Reembolso
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -1021,7 +1059,7 @@ export default function OdontoAiCompleteWorkspace() {
               <h1 className="font-bold text-sm text-slate-900 truncate">
                 {clinic.name}
               </h1>
-              <p className="text-[11px] text-slate-400">Painel Inteligente</p>
+              <p className="text-[11px] text-slate-500 font-medium">Painel Inteligente</p>
             </div>
           </div>
 
@@ -1071,7 +1109,7 @@ export default function OdontoAiCompleteWorkspace() {
                   {waitingHumanConvs.length}
                 </span>
               ) : (
-                <span className="text-xs text-slate-400">{conversations.length}</span>
+                <span className="text-xs text-slate-500 font-medium">{conversations.length}</span>
               )}
             </button>
 
@@ -1150,18 +1188,43 @@ export default function OdontoAiCompleteWorkspace() {
 
           <button
             onClick={() => setIsAuthenticated(false)}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-medium text-slate-600 hover:text-slate-900 transition"
+            aria-label="Sair da conta e encerrar sessão"
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-medium text-slate-700 hover:text-slate-900 transition focus:outline-none focus:ring-2 focus:ring-slate-400"
           >
-            <LogOut className="w-3.5 h-3.5" />
+            <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
             Sair da Conta
           </button>
+
+          <div className="pt-1 flex items-center justify-center gap-2 text-[10px] text-slate-500">
+            <Link
+              href="/politica-de-privacidade"
+              className="hover:text-slate-800 transition focus:outline-none focus:underline"
+            >
+              Privacidade
+            </Link>
+            <span>•</span>
+            <Link
+              href="/termos-de-uso"
+              className="hover:text-slate-800 transition focus:outline-none focus:underline"
+            >
+              Termos
+            </Link>
+            <span>•</span>
+            <Link
+              href="/politica-de-reembolso"
+              className="hover:text-slate-800 transition focus:outline-none focus:underline"
+            >
+              Reembolso
+            </Link>
+          </div>
         </div>
       </aside>
 
       {/* =========================================================
-          ÁREA DE CONTEÚDO PRINCIPAL
+          ÁREA DE CONTEÚDO PRINCIPAL COM SCROLL E RODAPÉ JURÍDICO
       ========================================================= */}
-      <main className="flex-1 p-8 max-w-6xl mx-auto w-full">
+      <div className="flex-1 flex flex-col min-w-0">
+        <main className="flex-1 p-8 max-w-6xl mx-auto w-full">
         {/* =========================================================
             VISÃO 1: AGENDA DO DIA + RADAR LATERAL DA IA
         ========================================================= */}
@@ -1204,30 +1267,33 @@ export default function OdontoAiCompleteWorkspace() {
                     type="button"
                     onClick={() => shiftAgendaDate(-1)}
                     title="Dia Anterior"
-                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
+                    aria-label="Ir para o dia anterior na agenda"
+                    className="p-1.5 rounded-lg text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition focus:outline-none focus:ring-2 focus:ring-sky-500"
                   >
-                    <ChevronLeft className="w-4 h-4" />
+                    <ChevronLeft className="w-4 h-4" aria-hidden="true" />
                   </button>
 
                   <input
                     type="date"
                     value={selectedAgendaDate}
+                    aria-label="Selecionar data específica no calendário"
                     onChange={(e) => {
                       if (e.target.value) {
                         setSelectedAgendaDate(e.target.value);
                         setViewAllAgendaDays(false);
                       }
                     }}
-                    className="text-xs font-semibold text-slate-800 px-2 py-1 focus:outline-none cursor-pointer"
+                    className="text-xs font-semibold text-slate-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-500 rounded cursor-pointer"
                   />
 
                   <button
                     type="button"
                     onClick={() => shiftAgendaDate(1)}
                     title="Próximo Dia"
-                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
+                    aria-label="Ir para o próximo dia na agenda"
+                    className="p-1.5 rounded-lg text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition focus:outline-none focus:ring-2 focus:ring-sky-500"
                   >
-                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="w-4 h-4" aria-hidden="true" />
                   </button>
                 </div>
 
@@ -1291,12 +1357,12 @@ export default function OdontoAiCompleteWorkspace() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-medium text-slate-400">
+                  <span className="text-xs font-semibold text-slate-600">
                     Pacientes ({selectedDayRelativeLabel})
                   </span>
                   <div className="text-2xl font-bold text-slate-900 mt-1">
                     {confirmedCount}{' '}
-                    <span className="text-sm font-normal text-slate-400">
+                    <span className="text-sm font-normal text-slate-600">
                       / {activeScopedAppointments.length} confirmados
                     </span>
                   </div>
@@ -1311,7 +1377,7 @@ export default function OdontoAiCompleteWorkspace() {
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-medium text-slate-400">Agendados pela IA</span>
+                  <span className="text-xs font-semibold text-slate-600">Agendados pela IA</span>
                   <div className="text-2xl font-bold text-slate-900 mt-1">
                     {aiBookedCount} consultas
                   </div>
@@ -1326,10 +1392,10 @@ export default function OdontoAiCompleteWorkspace() {
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-medium text-slate-400">Triagem no WhatsApp</span>
+                  <span className="text-xs font-semibold text-slate-600">Triagem no WhatsApp</span>
                   <div className="text-2xl font-bold text-emerald-600 mt-1">
                     {conversations.length}{' '}
-                    <span className="text-sm font-normal text-slate-400">
+                    <span className="text-sm font-normal text-slate-600">
                       {conversations.length === 1 ? 'conversa ativa' : 'conversas ativas'}
                     </span>
                   </div>
@@ -1390,14 +1456,14 @@ export default function OdontoAiCompleteWorkspace() {
                 <div className="divide-y divide-slate-100">
                   {filteredAppointments.length === 0 ? (
                     <div className="p-10 text-center space-y-3">
-                      <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                      <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center mx-auto">
                         <Calendar className="w-6 h-6" />
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-slate-700">
                           Nenhum agendamento para {selectedDayRelativeLabel.toLowerCase()}
                         </p>
-                        <p className="text-xs text-slate-400 mt-0.5">
+                        <p className="text-xs text-slate-500 mt-0.5">
                           Use as setas acima para navegar entre os dias anteriores e posteriores.
                         </p>
                       </div>
@@ -1434,7 +1500,7 @@ export default function OdontoAiCompleteWorkspace() {
                                 <div className="text-sm font-bold text-slate-900">
                                   {timeStart}
                                 </div>
-                                <div className="text-[11px] text-slate-400">
+                                <div className="text-[11px] text-slate-500 font-medium">
                                   {shortDateStr} • {appt.procedure.durationMinutes}m
                                 </div>
                               </div>
@@ -1471,7 +1537,7 @@ export default function OdontoAiCompleteWorkspace() {
                                     {appt.patient.phone}
                                   </span>
                                   <span>•</span>
-                                  <span className="text-slate-400">
+                                  <span className="text-slate-500 font-medium">
                                     {appt.patient.insuranceName || 'Particular'}
                                   </span>
                                 </div>
@@ -1565,7 +1631,7 @@ export default function OdontoAiCompleteWorkspace() {
                   </div>
 
                   {conversations.length === 0 ? (
-                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 text-center text-xs text-slate-400">
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 text-center text-xs text-slate-500 font-medium">
                       Nenhuma conversa ativa no momento.
                     </div>
                   ) : (
@@ -1625,14 +1691,14 @@ export default function OdontoAiCompleteWorkspace() {
             <div className="md:col-span-4 border-r border-slate-100 flex flex-col h-full min-h-0 overflow-hidden">
               <div className="p-4 border-b border-slate-100 shrink-0">
                 <h2 className="font-bold text-sm text-slate-900">Conversas WhatsApp</h2>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-500">
                   Acompanhe ou assuma o atendimento da IA
                 </p>
               </div>
 
               <div className="divide-y divide-slate-100 overflow-y-auto flex-1 min-h-0">
                 {conversations.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-slate-400">
+                  <div className="p-8 text-center text-xs text-slate-500">
                     Nenhuma conversa recebida ainda.
                   </div>
                 ) : (
@@ -1692,13 +1758,13 @@ export default function OdontoAiCompleteWorkspace() {
 
             {!selectedConversation ? (
               <div className="md:col-span-8 flex flex-col items-center justify-center p-8 text-center bg-slate-50/40">
-                <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3">
+                <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center mb-3">
                   <MessageSquare className="w-6 h-6" />
                 </div>
                 <h3 className="text-sm font-bold text-slate-700">
                   Nenhuma conversa selecionada
                 </h3>
-                <p className="text-xs text-slate-400 max-w-xs mt-1">
+                <p className="text-xs text-slate-500 max-w-xs mt-1">
                   Assim que um paciente enviar mensagem para o WhatsApp da clínica, o histórico aparecerá aqui em tempo real.
                 </p>
               </div>
@@ -1719,7 +1785,7 @@ export default function OdontoAiCompleteWorkspace() {
                       <h3 className="text-sm font-bold text-slate-900">
                         {selectedConversation.patient.name}
                       </h3>
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-500">
                         {selectedConversation.patient.phone} •{' '}
                         {selectedConversation.patient.insuranceName || 'Particular'}
                       </p>
@@ -1762,7 +1828,7 @@ export default function OdontoAiCompleteWorkspace() {
                         key={msg.id}
                         className={`flex flex-col ${isPatient ? 'items-start' : 'items-end'}`}
                       >
-                        <span className="text-[11px] text-slate-400 mb-1 px-1">
+                        <span className="text-[11px] text-slate-500 mb-1 px-1 font-medium">
                           {isPatient
                             ? selectedConversation.patient.name
                             : isAi
@@ -1787,7 +1853,7 @@ export default function OdontoAiCompleteWorkspace() {
 
                   {isAiTypingInChat && (
                     <div className="flex flex-col items-end">
-                      <span className="text-[11px] text-slate-400 mb-1 px-1">
+                      <span className="text-[11px] text-slate-500 mb-1 px-1 font-medium">
                         IA {clinic.aiAssistantName} digitando...
                       </span>
                       <div
@@ -1914,7 +1980,8 @@ export default function OdontoAiCompleteWorkspace() {
                           <button
                             onClick={() => handleDeleteDentist(dentist.id)}
                             title="Remover Profissional"
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                            aria-label={`Remover profissional ${dentist.name}`}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -2144,28 +2211,113 @@ export default function OdontoAiCompleteWorkspace() {
                 </button>
               </div>
             </div>
+
+            {/* Bloco de Governança LGPD e Diretrizes Éticas CFO */}
+            <div className="lg:col-span-12 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" aria-hidden="true" />
+                  <h3 className="font-bold text-base text-slate-900">
+                    Governança, Conformidade LGPD & Ética Odontológica (CFO/CRO)
+                  </h3>
+                </div>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                  <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+                  Tratamento Seguro Ativo
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Este sistema foi concebido sob o princípio de <strong>Privacidade por Padrão (Privacy by Default)</strong>.
+                Apenas dados estritamente necessários para o agendamento odontológico são coletados e trafegados. A inteligência
+                artificial está eticamente bloqueada para não realizar precificações fechadas à distância nem indicar receitas de medicamentos.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                  <p className="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    Encarregado de Dados (DPO)
+                  </p>
+                  <p className="text-slate-600">Canal direto para solicitações de pacientes e titulares:</p>
+                  <a href="mailto:dpo@odontoai.com.br" className="text-sky-700 font-medium underline block">
+                    dpo@odontoai.com.br
+                  </a>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                  <p className="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-sky-500" />
+                    Minimização de Dados
+                  </p>
+                  <p className="text-slate-600">
+                    Art. 6º, III da LGPD. Nenhum dado clínico sensível ou financeiro é compartilhado com terceiros.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                  <p className="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-purple-500" />
+                    Código de Ética do CFO
+                  </p>
+                  <p className="text-slate-600">
+                    Resolução CFO-118/2012. Orçamentos fornecidos apenas após a avaliação clínica presencial.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-4 text-xs">
+                <Link
+                  href="/politica-de-privacidade"
+                  className="font-medium text-sky-700 hover:text-sky-900 underline focus:outline-none focus:ring-1 focus:ring-sky-500 rounded"
+                >
+                  📄 Ler Política de Privacidade Completa
+                </Link>
+                <Link
+                  href="/termos-de-uso"
+                  className="font-medium text-sky-700 hover:text-sky-900 underline focus:outline-none focus:ring-1 focus:ring-sky-500 rounded"
+                >
+                  ⚖️ Ler Termos de Uso e Serviço
+                </Link>
+                <Link
+                  href="/politica-de-reembolso"
+                  className="font-medium text-sky-700 hover:text-sky-900 underline focus:outline-none focus:ring-1 focus:ring-sky-500 rounded"
+                >
+                  🔄 Política de Cancelamento e Reembolso
+                </Link>
+              </div>
+            </div>
           </div>
         )}
       </main>
+
+      <LegalFooter />
+    </div>
 
       {/* =========================================================
           MODAL BLOCO 8: CONEXÃO WHATSAPP VIA QR CODE
       ========================================================= */}
       {isQrModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-qr-title"
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4"
+        >
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl border border-slate-200 space-y-5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Smartphone className="w-5 h-5" style={{ color: brandColor }} />
-                <h3 className="font-bold text-base text-slate-900">
+                <Smartphone className="w-5 h-5" style={{ color: brandColor }} aria-hidden="true" />
+                <h3 id="modal-qr-title" className="font-bold text-base text-slate-900">
                   WhatsApp da Clínica
                 </h3>
               </div>
               <button
                 onClick={() => setIsQrModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                aria-label="Fechar modal de conexão do WhatsApp"
+                className="text-slate-500 hover:text-slate-800 p-1 rounded-lg hover:bg-slate-100 transition focus:outline-none focus:ring-2 focus:ring-sky-500"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" aria-hidden="true" />
               </button>
             </div>
 
@@ -2236,21 +2388,31 @@ export default function OdontoAiCompleteWorkspace() {
 
       {/* MODAL CADASTRAR NOVO PROFISSIONAL (DENTISTA) */}
       {isDentistModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dentist-modal-title"
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4"
+        >
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Stethoscope className="w-4 h-4" style={{ color: brandColor }} />
-                <h3 className="font-bold text-sm text-slate-900">
+                <h3 id="dentist-modal-title" className="font-bold text-sm text-slate-900">
                   Cadastrar Novo Profissional
                 </h3>
               </div>
               <button
                 onClick={() => setIsDentistModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                aria-label="Fechar formulário de cadastro de profissional"
+                className="text-slate-500 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition focus:outline-hidden focus:ring-2 focus:ring-slate-400"
               >
                 <X className="w-4 h-4" />
               </button>
+            </div>
+
+            <div className="p-2.5 bg-blue-50/70 border border-blue-200 rounded-xl text-[11px] text-blue-900 leading-snug">
+              ⚖️ <strong>Conformidade CFO/CRO:</strong> Somente cirurgiões-dentistas com CRO ativo podem realizar diagnósticos, consultas e procedimentos clínicos.
             </div>
 
             <form onSubmit={handleCreateDentist} className="space-y-3">
@@ -2266,7 +2428,7 @@ export default function OdontoAiCompleteWorkspace() {
                   onChange={(e) =>
                     setDentistForm((prev) => ({ ...prev, name: e.target.value }))
                   }
-                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2"
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2 focus:outline-hidden focus:ring-2 focus:ring-slate-400"
                 />
               </div>
 
@@ -2282,7 +2444,7 @@ export default function OdontoAiCompleteWorkspace() {
                   onChange={(e) =>
                     setDentistForm((prev) => ({ ...prev, cro: e.target.value }))
                   }
-                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2"
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2 focus:outline-hidden focus:ring-2 focus:ring-slate-400"
                 />
               </div>
 
@@ -2298,7 +2460,7 @@ export default function OdontoAiCompleteWorkspace() {
                   onChange={(e) =>
                     setDentistForm((prev) => ({ ...prev, specialty: e.target.value }))
                   }
-                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2"
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2 focus:outline-hidden focus:ring-2 focus:ring-slate-400"
                 />
               </div>
 
@@ -2311,6 +2473,7 @@ export default function OdontoAiCompleteWorkspace() {
                     <button
                       key={preset.color}
                       type="button"
+                      aria-label={`Cor ${preset.name}`}
                       onClick={() =>
                         setDentistForm((prev) => ({ ...prev, color: preset.color }))
                       }
@@ -2328,7 +2491,7 @@ export default function OdontoAiCompleteWorkspace() {
               <button
                 type="submit"
                 style={{ backgroundColor: brandColor }}
-                className="w-full py-2.5 rounded-xl hover:opacity-95 text-white text-xs font-semibold shadow-sm mt-2"
+                className="w-full py-2.5 rounded-xl hover:opacity-95 text-white text-xs font-semibold shadow-sm mt-2 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-slate-800"
               >
                 Salvar Profissional
               </button>
@@ -2339,16 +2502,26 @@ export default function OdontoAiCompleteWorkspace() {
 
       {/* MODAL NOVO AGENDAMENTO */}
       {isBookingModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="booking-modal-title"
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4"
+        >
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-sm text-slate-900">Novo Agendamento</h3>
+              <h3 id="booking-modal-title" className="font-bold text-sm text-slate-900">Novo Agendamento</h3>
               <button
                 onClick={() => setIsBookingModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                aria-label="Fechar formulário de agendamento manual"
+                className="text-slate-500 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition focus:outline-hidden focus:ring-2 focus:ring-slate-400"
               >
                 <X className="w-4 h-4" />
               </button>
+            </div>
+
+            <div className="p-2.5 bg-slate-50 border border-slate-200/90 rounded-xl text-[11px] text-slate-700 leading-snug">
+              🔒 <strong>Minimização de Dados (LGPD Art. 6º, III):</strong> Coletamos apenas nome e WhatsApp estritamente necessários para viabilizar e confirmar o atendimento.
             </div>
 
             <form onSubmit={handleCreateManualAppointment} className="space-y-3">
@@ -2360,7 +2533,7 @@ export default function OdontoAiCompleteWorkspace() {
                 onChange={(e) =>
                   setBookingForm((prev) => ({ ...prev, patientName: e.target.value }))
                 }
-                className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2"
+                className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2 focus:outline-hidden focus:ring-2 focus:ring-slate-400"
               />
               <input
                 type="text"

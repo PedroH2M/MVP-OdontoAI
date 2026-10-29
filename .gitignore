@@ -27,3 +27,6 @@ yarn-debug.log*
 yarn-error.log*
 .DS_Store
 Thumbs.db
+
+# Mídias e vídeos locais temporários
+video-commercial/
